@@ -1,0 +1,163 @@
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/ScreenPass.ush"
+#include "/Plugin/BlackMist/Private/BlackMistCommon.ush"
+
+SCREEN_PASS_TEXTURE_VIEWPORT(Input)
+Texture2D Input_Texture;
+SamplerState Input_Sampler;
+FScreenTransform SvPositionToInputTextureUV;
+float Threshold;
+float SoftKnee;
+float ScatterAmount;
+float MaxScatterRadiance;
+
+SCREEN_PASS_TEXTURE_VIEWPORT(LowInput)
+Texture2D LowInput_Texture;
+SamplerState LowInput_Sampler;
+FScreenTransform SvPositionToLowTextureUV;
+float LowWeight;
+
+SCREEN_PASS_TEXTURE_VIEWPORT(BaseInput)
+Texture2D BaseInput_Texture;
+SamplerState BaseInput_Sampler;
+FScreenTransform SvPositionToBaseTextureUV;
+float BaseWeight;
+
+SCREEN_PASS_TEXTURE_VIEWPORT(SceneColorInput)
+Texture2D SceneColorInput_Texture;
+SamplerState SceneColorInput_Sampler;
+FScreenTransform SvPositionToSceneColorTextureUV;
+
+SCREEN_PASS_TEXTURE_VIEWPORT(HaloInput)
+Texture2D HaloInput_Texture;
+SamplerState HaloInput_Sampler;
+FScreenTransform SvPositionToHaloTextureUV;
+
+SCREEN_PASS_TEXTURE_VIEWPORT(DebugD1Input)
+Texture2D DebugD1Input_Texture;
+SamplerState DebugD1Input_Sampler;
+FScreenTransform SvPositionToDebugD1TextureUV;
+
+SCREEN_PASS_TEXTURE_VIEWPORT(DebugD2Input)
+Texture2D DebugD2Input_Texture;
+SamplerState DebugD2Input_Sampler;
+FScreenTransform SvPositionToDebugD2TextureUV;
+
+SCREEN_PASS_TEXTURE_VIEWPORT(DebugD3Input)
+Texture2D DebugD3Input_Texture;
+SamplerState DebugD3Input_Sampler;
+FScreenTransform SvPositionToDebugD3TextureUV;
+
+SCREEN_PASS_TEXTURE_VIEWPORT(DebugD4Input)
+Texture2D DebugD4Input_Texture;
+SamplerState DebugD4Input_Sampler;
+FScreenTransform SvPositionToDebugD4TextureUV;
+
+float Intensity;
+float HaloStrength;
+float CoreLoss;
+float Contrast;
+float ContrastPivot;
+float ShadowLift;
+float ShadowStart;
+float ShadowEnd;
+float3 HaloTint;
+uint DebugMode;
+
+void BlackMistPrefilterPS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	const float2 UV = ApplyScreenTransform(SvPosition.xy, SvPositionToInputTextureUV);
+	float3 Color = BlackMistDownsample13(Input_Texture, Input_Sampler, UV, Input_ExtentInverse, Input_UVViewportBilinearMin, Input_UVViewportBilinearMax);
+	Color = BlackMistClampRadiance(Color, MaxScatterRadiance);
+
+	const float Mask = BlackMistSoftThresholdMask(Color, Threshold, SoftKnee);
+	OutColor = float4(max(Color * Mask * ScatterAmount, 0.0), 1.0);
+}
+
+void BlackMistDownsamplePS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	const float2 UV = ApplyScreenTransform(SvPosition.xy, SvPositionToInputTextureUV);
+	const float3 Color = BlackMistDownsample13(Input_Texture, Input_Sampler, UV, Input_ExtentInverse, Input_UVViewportBilinearMin, Input_UVViewportBilinearMax);
+	OutColor = float4(max(Color, 0.0), 1.0);
+}
+
+void BlackMistUpsamplePS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	const float2 LowUV = ApplyScreenTransform(SvPosition.xy, SvPositionToLowTextureUV);
+	const float2 BaseUV = ApplyScreenTransform(SvPosition.xy, SvPositionToBaseTextureUV);
+
+	const float3 Low = BlackMistTent9(LowInput_Texture, LowInput_Sampler, LowUV, LowInput_ExtentInverse, LowInput_UVViewportBilinearMin, LowInput_UVViewportBilinearMax) * LowWeight;
+	const float3 Base = BlackMistSample(BaseInput_Texture, BaseInput_Sampler, BaseUV, BaseInput_UVViewportBilinearMin, BaseInput_UVViewportBilinearMax).rgb * BaseWeight;
+
+	OutColor = float4(max(BlackMistSanitizeColor(Base) + BlackMistSanitizeColor(Low), 0.0), 1.0);
+}
+
+void BlackMistCompositePS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	const float2 SceneUV = ApplyScreenTransform(SvPosition.xy, SvPositionToSceneColorTextureUV);
+	const float4 SceneColor = BlackMistSample(SceneColorInput_Texture, SceneColorInput_Sampler, SceneUV, SceneColorInput_UVViewportBilinearMin, SceneColorInput_UVViewportBilinearMax);
+	const float3 SceneRGB = BlackMistSanitizeColor(SceneColor.rgb);
+	const float Mask = BlackMistSoftThresholdMask(SceneRGB, Threshold, SoftKnee);
+
+	const float3 Core = max(SceneRGB - SceneRGB * Mask * CoreLoss * Intensity, 0.0);
+
+	const float2 HaloUV = ApplyScreenTransform(SvPosition.xy, SvPositionToHaloTextureUV);
+	const float3 RawHalo = BlackMistTent9(HaloInput_Texture, HaloInput_Sampler, HaloUV, HaloInput_ExtentInverse, HaloInput_UVViewportBilinearMin, HaloInput_UVViewportBilinearMax);
+	const float3 Halo = RawHalo * HaloTint * HaloStrength * Intensity;
+
+	const float Pivot = ContrastPivot * max(View.PreExposure, 0.000001);
+	float3 Misted = max(Core + Halo, 0.0);
+	Misted = max(Pivot + (Misted - Pivot) * Contrast, 0.0);
+
+	const float ShadowStartPreExposed = ShadowStart * max(View.PreExposure, 0.000001);
+	const float ShadowEndPreExposed = max(ShadowEnd * max(View.PreExposure, 0.000001), ShadowStartPreExposed + 0.0001);
+	const float ShadowMask = 1.0 - smoothstep(ShadowStartPreExposed, ShadowEndPreExposed, BlackMistLuminance(Misted));
+	Misted += ShadowMask * ShadowLift * max(View.PreExposure, 0.000001);
+
+	if (DebugMode == 1)
+	{
+		OutColor = float4(Mask.xxx, SceneColor.a);
+		return;
+	}
+	if (DebugMode == 2)
+	{
+		const float2 DebugUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDebugD1TextureUV);
+		OutColor = float4(BlackMistTent9(DebugD1Input_Texture, DebugD1Input_Sampler, DebugUV, DebugD1Input_ExtentInverse, DebugD1Input_UVViewportBilinearMin, DebugD1Input_UVViewportBilinearMax), SceneColor.a);
+		return;
+	}
+	if (DebugMode == 3)
+	{
+		const float2 DebugUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDebugD2TextureUV);
+		OutColor = float4(BlackMistTent9(DebugD2Input_Texture, DebugD2Input_Sampler, DebugUV, DebugD2Input_ExtentInverse, DebugD2Input_UVViewportBilinearMin, DebugD2Input_UVViewportBilinearMax), SceneColor.a);
+		return;
+	}
+	if (DebugMode == 4)
+	{
+		const float2 DebugUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDebugD3TextureUV);
+		OutColor = float4(BlackMistTent9(DebugD3Input_Texture, DebugD3Input_Sampler, DebugUV, DebugD3Input_ExtentInverse, DebugD3Input_UVViewportBilinearMin, DebugD3Input_UVViewportBilinearMax), SceneColor.a);
+		return;
+	}
+	if (DebugMode == 5)
+	{
+		const float2 DebugUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDebugD4TextureUV);
+		OutColor = float4(BlackMistTent9(DebugD4Input_Texture, DebugD4Input_Sampler, DebugUV, DebugD4Input_ExtentInverse, DebugD4Input_UVViewportBilinearMin, DebugD4Input_UVViewportBilinearMax), SceneColor.a);
+		return;
+	}
+	if (DebugMode == 6)
+	{
+		OutColor = float4(RawHalo, SceneColor.a);
+		return;
+	}
+	if (DebugMode == 7)
+	{
+		OutColor = float4(Core, SceneColor.a);
+		return;
+	}
+	if (DebugMode == 8)
+	{
+		OutColor = float4(max(Halo, 0.0), SceneColor.a);
+		return;
+	}
+
+	OutColor = float4(max(BlackMistSanitizeColor(Misted), 0.0), SceneColor.a);
+}

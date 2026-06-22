@@ -1,0 +1,93 @@
+#pragma once
+
+float BlackMistLuminance(float3 Color)
+{
+	return dot(Color, float3(0.2126, 0.7152, 0.0722));
+}
+
+float3 BlackMistSanitizeColor(float3 Color)
+{
+	return MakePositiveFinite(Color);
+}
+
+float3 BlackMistClampRadiance(float3 Color, float MaxRadianceScene)
+{
+	Color = BlackMistSanitizeColor(Color);
+
+	const float MaxRadiance = MaxRadianceScene * max(View.PreExposure, 0.000001);
+	if (MaxRadiance <= 0.0)
+	{
+		return Color;
+	}
+
+	const float Peak = max(max(Color.r, Color.g), Color.b);
+	const float Scale = Peak > MaxRadiance ? MaxRadiance / max(Peak, 0.000001) : 1.0;
+	return Color * Scale;
+}
+
+float BlackMistSoftThresholdMask(float3 Color, float ThresholdScene, float SoftKnee)
+{
+	const float Threshold = max(ThresholdScene * max(View.PreExposure, 0.000001), 0.0);
+	const float Y = BlackMistLuminance(BlackMistSanitizeColor(Color));
+	const float Knee = max(Threshold * SoftKnee, 0.0001);
+
+	float Soft = saturate((Y - Threshold + Knee) / (2.0 * Knee));
+	Soft = Soft * Soft * (3.0 - 2.0 * Soft);
+
+	const float Hard = max(Y - Threshold, 0.0) / max(Y, 0.0001);
+	return saturate(max(Soft, Hard));
+}
+
+float2 BlackMistClampUV(float2 UV, float2 UVMin, float2 UVMax)
+{
+	return clamp(UV, UVMin, UVMax);
+}
+
+float4 BlackMistSample(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 UVMin, float2 UVMax)
+{
+	return TextureObject.SampleLevel(TextureSampler, BlackMistClampUV(UV, UVMin, UVMax), 0.0);
+}
+
+float3 BlackMistWeightedSample(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 Offset, float2 UVMin, float2 UVMax)
+{
+	return BlackMistSanitizeColor(BlackMistSample(TextureObject, TextureSampler, UV + Offset * TexelSize, UVMin, UVMax).rgb);
+}
+
+float3 BlackMistDownsample13(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 UVMin, float2 UVMax)
+{
+	float3 Sum = 0.20 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(0.0, 0.0), UVMin, UVMax);
+
+	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  0.0), UVMin, UVMax);
+	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  0.0), UVMin, UVMax);
+	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  1.0), UVMin, UVMax);
+	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -1.0), UVMin, UVMax);
+
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  1.0), UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  1.0), UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0, -1.0), UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0, -1.0), UVMin, UVMax);
+
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 2.0,  0.0), UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-2.0,  0.0), UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  2.0), UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -2.0), UVMin, UVMax);
+
+	return Sum;
+}
+
+float3 BlackMistTent9(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 UVMin, float2 UVMax)
+{
+	float3 Sum = 0.25 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(0.0, 0.0), UVMin, UVMax);
+
+	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  0.0), UVMin, UVMax);
+	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  0.0), UVMin, UVMax);
+	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  1.0), UVMin, UVMax);
+	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -1.0), UVMin, UVMax);
+
+	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  1.0), UVMin, UVMax);
+	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  1.0), UVMin, UVMax);
+	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0, -1.0), UVMin, UVMax);
+	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0, -1.0), UVMin, UVMax);
+
+	return Sum;
+}

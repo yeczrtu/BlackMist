@@ -1,0 +1,33 @@
+# Unreal generated files
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+Plugins/*/Saved/
+
+# IDE and local user state
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sdf
+*.opensdf
+
+# Build and package output
+*.log
+*.tmp
+*.zip
+*.7z
+*.pak
+*.utoc
+*.ucas
+
+# OS files
+Thumbs.db
+.DS_Store
