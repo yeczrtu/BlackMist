@@ -73,7 +73,15 @@ Engine/Build/BatchFiles/RunUAT.bat BuildPlugin -Plugin="Path/To/BlackMist/BlackM
 
 ## Usage
 
-The plugin creates one `UBlackMistSubsystem` per world. Settings can be changed from Blueprint through:
+Open Project Settings and edit:
+
+```text
+Project Settings > Plugins > Black Mist
+```
+
+`Default Settings` is applied when each world creates its `UBlackMistSubsystem`. In the editor, changing the Project Settings entry also pushes the new defaults into existing Black Mist subsystems.
+
+Settings can still be changed at runtime from Blueprint through:
 
 - `SetBlackMistSettings`
 - `GetBlackMistSettings`
@@ -128,6 +136,7 @@ The implementation has been checked against UE 5.7.4:
 
 - `RunUAT BuildPlugin` succeeded for Win64 Editor Development, Development Game, and Shipping compile.
 - The consuming project mounted the plugin and reached Engine initialization without the earlier `Common.ush` shader include failure.
+- Project Settings integration compiles through UHT and all BuildPlugin target configurations.
 
 The following still need project-side validation:
 

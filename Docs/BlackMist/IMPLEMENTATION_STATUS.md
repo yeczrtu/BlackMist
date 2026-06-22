@@ -77,8 +77,12 @@ Intermediate RDG textures are named:
 ## Settings and threading
 
 - UObject-facing settings live in `FBlackMistSettings`.
+- Project-level defaults live in `UBlackMistProjectSettings : UDeveloperSettings`.
+- The Project Settings path is `Project Settings > Plugins > Black Mist`.
 - Render-thread settings live in POD `FBlackMistRenderSettings`.
+- `UBlackMistSubsystem` initializes its world settings from `UBlackMistProjectSettings::DefaultSettings`.
 - `UBlackMistSubsystem` sanitizes and normalizes settings on the game thread, then transfers the snapshot with `ENQUEUE_RENDER_COMMAND`.
+- In editor builds, changing `UBlackMistProjectSettings` reapplies defaults to existing world subsystems.
 - Render thread does not access UObjects.
 - No `FlushRenderingCommands` calls were added.
 - UObject-facing `ScaleWeights` uses `FLinearColor` for UHT/Blueprint compatibility; it is converted to `FVector4f` in the render POD.
@@ -114,6 +118,7 @@ Result:
 - UHT completed with warnings treated as errors.
 - Re-run after plugin-root publication layout normalization also succeeded with root `BlackMist.uplugin`.
 - `Config/FilterPlugin.ini` packages README, LICENSE, third-party notices, and `Docs/...` into BuildPlugin output.
+- Re-run after adding `UBlackMistProjectSettings` also succeeded for `UnrealEditor Win64 Development`, `UnrealGame Win64 Development`, and `UnrealGame Win64 Shipping`.
 
 Additional validation after shader include correction:
 

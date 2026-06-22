@@ -1,5 +1,6 @@
 #include "BlackMistSubsystem.h"
 
+#include "BlackMistProjectSettings.h"
 #include "BlackMistSceneViewExtension.h"
 #include "SceneViewExtension.h"
 
@@ -11,6 +12,7 @@ void UBlackMistSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	if (UWorld* World = GetWorld())
 	{
+		Settings = GetDefault<UBlackMistProjectSettings>()->DefaultSettings;
 		SceneViewExtension = FSceneViewExtensions::NewExtension<FBlackMistSceneViewExtension>(World);
 		PushSettingsToRenderThread(true);
 	}

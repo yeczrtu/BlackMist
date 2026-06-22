@@ -11,6 +11,7 @@ public class BlackMistRuntime : ModuleRules
 			{
 				"Core",
 				"CoreUObject",
+				"DeveloperSettings",
 				"Engine"
 			});
 
