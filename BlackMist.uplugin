@@ -15,6 +15,11 @@
 			"Name": "BlackMistRuntime",
 			"Type": "Runtime",
 			"LoadingPhase": "PostConfigInit"
+		},
+		{
+			"Name": "BlackMistEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	]
 }

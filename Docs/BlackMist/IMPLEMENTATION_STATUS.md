@@ -79,6 +79,8 @@ Intermediate RDG textures are named:
 - UObject-facing settings live in `FBlackMistSettings`.
 - Project-level defaults live in `UBlackMistProjectSettings : UDeveloperSettings`.
 - The Project Settings path is `Project Settings > Plugins > Black Mist`.
+- Project Settings reset arrows are provided by the editor-only `BlackMistEditor` module using a details customization for `UBlackMistProjectSettings`.
+- Each parameter row under `DefaultSettings` resets to the plugin C++ default from `FBlackMistSettings()`.
 - Render-thread settings live in POD `FBlackMistRenderSettings`.
 - `UBlackMistSubsystem` initializes its world settings from `UBlackMistProjectSettings::DefaultSettings`.
 - `UBlackMistSubsystem` sanitizes and normalizes settings on the game thread, then transfers the snapshot with `ENQUEUE_RENDER_COMMAND`.
@@ -119,6 +121,7 @@ Result:
 - Re-run after plugin-root publication layout normalization also succeeded with root `BlackMist.uplugin`.
 - `Config/FilterPlugin.ini` packages README, LICENSE, third-party notices, and `Docs/...` into BuildPlugin output.
 - Re-run after adding `UBlackMistProjectSettings` also succeeded for `UnrealEditor Win64 Development`, `UnrealGame Win64 Development`, and `UnrealGame Win64 Shipping`.
+- Re-run after adding `BlackMistEditor` reset-arrow customization also succeeded for `UnrealEditor Win64 Development`, `UnrealGame Win64 Development`, and `UnrealGame Win64 Shipping`.
 
 Additional validation after shader include correction:
 

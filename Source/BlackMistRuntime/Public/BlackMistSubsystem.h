@@ -31,6 +31,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Black Mist")
 	void SetDebugMode(EBlackMistDebugMode InDebugMode);
 
+	UFUNCTION(BlueprintCallable, Category = "Black Mist")
+	void ResetToProjectDefaultSettings();
+
+	UFUNCTION(BlueprintCallable, Category = "Black Mist")
+	void ResetToPluginDefaultSettings();
+
 private:
 	void PushSettingsToRenderThread(bool bForce = false);
 

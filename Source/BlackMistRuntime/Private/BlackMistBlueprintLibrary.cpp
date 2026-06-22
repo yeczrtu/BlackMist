@@ -45,3 +45,19 @@ void UBlackMistBlueprintLibrary::SetBlackMistEnabled(const UObject* WorldContext
 		Subsystem->SetEnabled(bEnabled);
 	}
 }
+
+void UBlackMistBlueprintLibrary::ResetBlackMistToProjectDefaults(const UObject* WorldContextObject)
+{
+	if (UBlackMistSubsystem* Subsystem = GetBlackMistSubsystem(WorldContextObject))
+	{
+		Subsystem->ResetToProjectDefaultSettings();
+	}
+}
+
+void UBlackMistBlueprintLibrary::ResetBlackMistToPluginDefaults(const UObject* WorldContextObject)
+{
+	if (UBlackMistSubsystem* Subsystem = GetBlackMistSubsystem(WorldContextObject))
+	{
+		Subsystem->ResetToPluginDefaultSettings();
+	}
+}

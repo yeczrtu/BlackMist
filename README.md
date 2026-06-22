@@ -81,11 +81,15 @@ Project Settings > Plugins > Black Mist
 
 `Default Settings` is applied when each world creates its `UBlackMistSubsystem`. In the editor, changing the Project Settings entry also pushes the new defaults into existing Black Mist subsystems.
 
+Each Black Mist parameter row has a reset arrow when its value differs from the plugin default.
+
 Settings can still be changed at runtime from Blueprint through:
 
 - `SetBlackMistSettings`
 - `GetBlackMistSettings`
 - `SetBlackMistEnabled`
+- `ResetBlackMistToProjectDefaults`
+- `ResetBlackMistToPluginDefaults`
 
 C++ example:
 
@@ -137,6 +141,7 @@ The implementation has been checked against UE 5.7.4:
 - `RunUAT BuildPlugin` succeeded for Win64 Editor Development, Development Game, and Shipping compile.
 - The consuming project mounted the plugin and reached Engine initialization without the earlier `Common.ush` shader include failure.
 - Project Settings integration compiles through UHT and all BuildPlugin target configurations.
+- Project Settings reset arrows are provided by the editor-only `BlackMistEditor` module.
 
 The following still need project-side validation:
 

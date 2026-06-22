@@ -10,6 +10,18 @@ UBlackMistProjectSettings::UBlackMistProjectSettings()
 {
 }
 
+void UBlackMistProjectSettings::ResetToPluginDefaults()
+{
+	DefaultSettings = GetPluginDefaultSettings();
+	SaveConfig();
+	ApplyToExistingWorlds();
+}
+
+FBlackMistSettings UBlackMistProjectSettings::GetPluginDefaultSettings()
+{
+	return FBlackMistSettings();
+}
+
 FName UBlackMistProjectSettings::GetCategoryName() const
 {
 	return TEXT("Plugins");
@@ -29,7 +41,12 @@ FText UBlackMistProjectSettings::GetSectionDescription() const
 void UBlackMistProjectSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
+	ApplyToExistingWorlds();
+}
+#endif
 
+void UBlackMistProjectSettings::ApplyToExistingWorlds() const
+{
 	if (!GEngine)
 	{
 		return;
@@ -49,4 +66,3 @@ void UBlackMistProjectSettings::PostEditChangeProperty(FPropertyChangedEvent& Pr
 		}
 	}
 }
-#endif

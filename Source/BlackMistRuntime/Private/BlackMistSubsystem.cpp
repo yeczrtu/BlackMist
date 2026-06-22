@@ -69,6 +69,16 @@ void UBlackMistSubsystem::SetDebugMode(EBlackMistDebugMode InDebugMode)
 	PushSettingsToRenderThread();
 }
 
+void UBlackMistSubsystem::ResetToProjectDefaultSettings()
+{
+	SetSettings(GetDefault<UBlackMistProjectSettings>()->DefaultSettings);
+}
+
+void UBlackMistSubsystem::ResetToPluginDefaultSettings()
+{
+	SetSettings(UBlackMistProjectSettings::GetPluginDefaultSettings());
+}
+
 void UBlackMistSubsystem::PushSettingsToRenderThread(bool bForce)
 {
 	if (!SceneViewExtension.IsValid())

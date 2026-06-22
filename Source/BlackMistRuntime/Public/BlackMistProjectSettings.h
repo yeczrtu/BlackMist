@@ -16,6 +16,10 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Black Mist")
 	FBlackMistSettings DefaultSettings;
 
+	void ResetToPluginDefaults();
+
+	static FBlackMistSettings GetPluginDefaultSettings();
+
 	virtual FName GetCategoryName() const override;
 
 #if WITH_EDITOR
@@ -23,4 +27,7 @@ public:
 	virtual FText GetSectionDescription() const override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
+
+private:
+	void ApplyToExistingWorlds() const;
 };

@@ -19,4 +19,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Black Mist", meta = (WorldContext = "WorldContextObject"))
 	static void SetBlackMistEnabled(const UObject* WorldContextObject, bool bEnabled);
+
+	UFUNCTION(BlueprintCallable, Category = "Black Mist", meta = (WorldContext = "WorldContextObject"))
+	static void ResetBlackMistToProjectDefaults(const UObject* WorldContextObject);
+
+	UFUNCTION(BlueprintCallable, Category = "Black Mist", meta = (WorldContext = "WorldContextObject"))
+	static void ResetBlackMistToPluginDefaults(const UObject* WorldContextObject);
 };
