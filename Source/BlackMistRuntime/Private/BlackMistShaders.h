@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GlobalShader.h"
+#include "SceneView.h"
 #include "ShaderParameterStruct.h"
 #include "ScreenPass.h"
 

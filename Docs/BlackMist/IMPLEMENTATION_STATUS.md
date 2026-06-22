@@ -6,10 +6,14 @@
 - No `.uproject` file was present in this repository at implementation time.
 - No existing `.uplugin` or source module was present at implementation time, so the implementation created a new Runtime plugin.
 - For GitHub publication, the repository was normalized into a plugin-root layout with `BlackMist.uplugin`, `Source/BlackMistRuntime`, and `Shaders/Private` at the repository root.
-- Target Engine was taken from `D:\Unreal\UE_5.7\Engine\Build\Build.version`:
+- Primary implementation Engine was taken from `D:\Unreal\UE_5.7\Engine\Build\Build.version`:
   - UE 5.7.4
   - Changelist 51494982
   - Branch `++UE5+Release-5.7`
+- Release validation also used `D:\Unreal\UE_5.8\Engine\Build\Build.version`:
+  - UE 5.8.0
+  - Changelist 55116800
+  - Branch `++UE5+Release-5.8`
 
 ## UE 5.7 API notes
 
@@ -40,6 +44,23 @@ Existing Engine examples inspected:
 - `Renderer/Private/PostProcess/PostProcessing.cpp` for callback ordering, pass translation, and `BL_SceneColorBeforeBloom` mapping.
 - `Renderer/Private/PostProcess/PostProcessMaterial.cpp` for `ReturnUntouchedSceneColorForPostProcessing`.
 - `Renderer/Private/ScreenPass.cpp` for `CopyFromSlice`.
+
+## UE 5.8 API notes
+
+Headers inspected:
+
+- `Engine/Source/Runtime/Engine/Public/SceneViewExtension.h`
+- `Engine/Source/Runtime/Renderer/Public/PostProcess/PostProcessMaterialInputs.h`
+- `Engine/Source/Runtime/Renderer/Public/ScreenPass.h`
+- `Engine/Source/Runtime/RenderCore/Public/RenderGraphBuilder.h`
+- `Engine/Source/Runtime/Engine/Public/SceneView.h`
+
+Key 5.8 compatibility notes:
+
+- The active post-process subscription overload is still the View-aware overload:
+  `SubscribeToPostProcessingPass(EPostProcessingPass Pass, const FSceneView& InView, FPostProcessingPassDelegateArray& InOutPassCallbacks, bool bIsPassEnabled)`.
+- `ReturnUntouchedSceneColorForPostProcessing`, `FScreenPassTexture::CopyFromSlice`, and `FScreenPassTextureInput` remain available from public Renderer headers.
+- `FViewUniformShaderParameters` is declared in public `SceneView.h`. `BlackMistShaders.h` includes it directly so Game targets do not depend on Editor-only transitive includes.
 
 ## Integration decision
 
@@ -103,6 +124,7 @@ Intermediate RDG textures are named:
   - `/Engine/Private/ScreenPass.ush`
 - This fixes plugin shader compilation failing at `/Plugin/BlackMist/Private/BlackMist.usf(1): File 'Common.ush' not found`.
 - Verified there are no remaining relative `Common.ush` or `ScreenPass.ush` includes under `Shaders`.
+- C++ shader parameter declarations include public `SceneView.h` directly for `FViewUniformShaderParameters`; this is required by UE 5.8 Game target builds.
 
 ## Build and validation performed
 
@@ -122,6 +144,8 @@ Result:
 - `Config/FilterPlugin.ini` packages README, LICENSE, third-party notices, and `Docs/...` into BuildPlugin output.
 - Re-run after adding `UBlackMistProjectSettings` also succeeded for `UnrealEditor Win64 Development`, `UnrealGame Win64 Development`, and `UnrealGame Win64 Shipping`.
 - Re-run after adding `BlackMistEditor` reset-arrow customization also succeeded for `UnrealEditor Win64 Development`, `UnrealGame Win64 Development`, and `UnrealGame Win64 Shipping`.
+- Release packaging with UE 5.7.4 succeeded for Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping`.
+- Release packaging with UE 5.8.0 succeeded for Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping`.
 
 Additional validation after shader include correction:
 

@@ -33,7 +33,7 @@ The effect is intended to behave more like optical black mist filtration than or
 
 ## Requirements
 
-- Unreal Engine 5.7 was used for implementation and validation.
+- Unreal Engine 5.7.4 and 5.8.0 were used for Win64 package validation.
 - Desktop SM5/SM6 rendering path.
 - The plugin is not validated for mobile, path tracing, or tiled Movie Render Queue output.
 
@@ -46,6 +46,7 @@ BlackMist.uplugin
 Docs/
 Shaders/
 Source/
+  BlackMistEditor/
   BlackMistRuntime/
 ```
 
@@ -130,15 +131,15 @@ r.BlackMist.ForcePassLocation 0
 
 ## Rendering Notes
 
-The default post-process subscription point is `EPostProcessingPass::MotionBlur`, which maps to a pre-tonemap scene color slot before built-in bloom in UE 5.7. Set `r.BlackMist.ForcePassLocation=1` to test the `AfterDOF` location.
+The default post-process subscription point is `EPostProcessingPass::MotionBlur`, which maps to a pre-tonemap scene color slot before built-in bloom in UE 5.7/5.8. Set `r.BlackMist.ForcePassLocation=1` to test the `AfterDOF` location.
 
 The shaders include Engine shader headers by virtual path and do not copy Engine shader source into this repository.
 
 ## Validation Status
 
-The implementation has been checked against UE 5.7.4:
+The implementation has been checked against UE 5.7.4 and UE 5.8.0:
 
-- `RunUAT BuildPlugin` succeeded for Win64 Editor Development, Development Game, and Shipping compile.
+- `RunUAT BuildPlugin` succeeded for Win64 Editor Development, Development Game, and Shipping compile on both engine versions.
 - The consuming project mounted the plugin and reached Engine initialization without the earlier `Common.ush` shader include failure.
 - Project Settings integration compiles through UHT and all BuildPlugin target configurations.
 - Project Settings reset arrows are provided by the editor-only `BlackMistEditor` module.
