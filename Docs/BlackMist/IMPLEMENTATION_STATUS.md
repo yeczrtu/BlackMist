@@ -116,7 +116,45 @@ Intermediate RDG textures are named:
 - `r.BlackMist.Enable`
 - `r.BlackMist.Debug`
 - `r.BlackMist.IntermediateFormat`
+- `r.BlackMist.CompositeFilter`
 - `r.BlackMist.ForcePassLocation`
+
+## Quality upgrade implementation
+
+Upgrade package executed from:
+
+```text
+C:\Users\t-hoshino\Downloads\BlackMist_Codex_Quality_Upgrade_Package\BlackMist_Codex_Quality_Upgrade_Package
+```
+
+Starting revision before the quality upgrade:
+
+```text
+3e998a4f08cd6cfde614e603b6163fccde790a2b
+```
+
+Baseline package review reference:
+
+```text
+d68ce6b26d961f5cd7dd519bc1bfd8daff78a95f
+```
+
+Implemented changes:
+
+- `Intensity` is now a continuous blend. The unit effect is computed first, `0..1` blends from the original scene color to that unit effect, and `1..2` overdrives halo/core removal.
+- Standard activation still creates zero Black Mist callbacks/passes when `Intensity` is zero because `FBlackMistRenderSettings::IsEffectActive()` remains false below epsilon.
+- Prefilter now sanitizes, soft-limits, thresholds, and converts each tap to scatter energy before weighted averaging.
+- Halo source and direct core removal share `BlackMistScatterSource`.
+- `CoreLossOnly` debug mode now displays removed energy rather than the remaining core.
+- Added finite setting sanitization before range clamps, with invalid scalar/color/weight values falling back to plugin defaults where appropriate.
+- Added optical controls: `DiffusionRadius`, `WideTail`, `BaseScatter`, `ScatterMetric`, `ChromaSensitivity`, and `LocalVeilingStrength`.
+- `Contrast` is locally masked from actual halo/core-loss energy, while `LocalVeilingStrength` controls shadow lift only; this avoids full-frame grading without making `Contrast` dependent on the veil-lift control.
+- Default `ScaleWeights` now derive from `WideTail`; custom `ScaleWeights` remain supported and are normalized to a non-negative sum of one.
+- Normal final composite uses `FBlackMistCompositePS` and binds only SceneColor, U1 halo, transforms, and constants.
+- Debug output uses `FBlackMistDebugCompositePS` in the same eighth `BlackMist.Composite` pass and binds D1-D4 only when a debug mode is active.
+- `r.BlackMist.CompositeFilter` selects full-resolution halo reconstruction: `0` one bilinear sample, `1` four-tap bilinear tent default, `2` nine-tap reference.
+- `r.BlackMist.IntermediateFormat=0` now performs real Auto selection: R11G11B10F is used only when the RHI reports `Texture2D`, `TextureSample`, and `RenderTarget` capabilities and 4-byte block size; otherwise RGBA16F is used.
+- Added `Plugins.BlackMist.Settings.Sanitization` automation test for finite fallback, clamp behavior, tint sanitization, and scale-weight normalization.
 
 ## Shader include correction
 
@@ -148,6 +186,24 @@ Result:
 - Release packaging with UE 5.7.4 succeeded for Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping`.
 - Release packaging with UE 5.8.0 succeeded for Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping`.
 - Re-run after enabling Path Tracing views succeeded for UE 5.7.4 and UE 5.8.0 Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping`.
+- Quality-upgrade BuildPlugin validation on 2026-06-23:
+  - UE 5.7.4 command:
+    `D:\Unreal\UE_5.7\Engine\Build\BatchFiles\RunUAT.bat BuildPlugin -Plugin="C:\Users\t-hoshino\Documents\BlackMist\BlackMist.uplugin" -Package="C:\Users\t-hoshino\Documents\BlackMist\Saved\QualityUpgradeValidation\UE5.7\BlackMist" -TargetPlatforms=Win64 -Rocket`
+  - UE 5.7.4 result:
+    `UnrealEditor Win64 Development`, `UnrealGame Win64 Development`, and `UnrealGame Win64 Shipping` succeeded; log `C:\Users\t-hoshino\Documents\BlackMist\Saved\QualityUpgradeValidation\UE5.7_BuildPlugin.log`.
+  - UE 5.8.0 command:
+    `D:\Unreal\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat BuildPlugin -Plugin="C:\Users\t-hoshino\Documents\BlackMist\BlackMist.uplugin" -Package="C:\Users\t-hoshino\Documents\BlackMist\Saved\QualityUpgradeValidation\UE5.8\BlackMist" -TargetPlatforms=Win64 -Rocket`
+  - UE 5.8.0 result:
+    `UnrealEditor Win64 Development`, `UnrealGame Win64 Development`, and `UnrealGame Win64 Shipping` succeeded; log `C:\Users\t-hoshino\Documents\BlackMist\Saved\QualityUpgradeValidation\UE5.8_BuildPlugin.log`.
+- Quality-upgrade automation validation on 2026-06-23:
+  - UE 5.7.4 command:
+    `D:\Unreal\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <AutomationHostUE5.7.uproject> -NullRHI -unattended -nop4 -nosplash -NoSound -NoLoadingScreen -stdout -FullStdOutLogOutput -AbsLog=<UE5.7_Automation_BlackMistSettings_Abs.log> -ExecCmds="Automation RunTests Plugins.BlackMist.Settings.Sanitization" -TestExit="Automation Test Queue Empty"`
+  - UE 5.7.4 result:
+    found one test and completed with `Result={Success}`; log `C:\Users\t-hoshino\Documents\BlackMist\Saved\QualityUpgradeValidation\UE5.7_Automation_BlackMistSettings_Abs.log`.
+  - UE 5.8.0 command:
+    `D:\Unreal\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <AutomationHostUE5.8.uproject> -NullRHI -unattended -nop4 -nosplash -NoSound -NoLoadingScreen -stdout -FullStdOutLogOutput -AbsLog=<UE5.8_Automation_BlackMistSettings_Abs.log> -ExecCmds="Automation RunTests Plugins.BlackMist.Settings.Sanitization" -TestExit="Automation Test Queue Empty"`
+  - UE 5.8.0 result:
+    found one test and completed with `Result={Success}`; log `C:\Users\t-hoshino\Documents\BlackMist\Saved\QualityUpgradeValidation\UE5.8_Automation_BlackMistSettings_Abs.log`.
 
 Additional validation after shader include correction:
 

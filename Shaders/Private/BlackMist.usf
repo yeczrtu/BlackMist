@@ -10,6 +10,10 @@ float Threshold;
 float SoftKnee;
 float ScatterAmount;
 float MaxScatterRadiance;
+float Radius;
+float BaseScatter;
+float ChromaSensitivity;
+uint ScatterMetric;
 
 SCREEN_PASS_TEXTURE_VIEWPORT(LowInput)
 Texture2D LowInput_Texture;
@@ -62,22 +66,21 @@ float ShadowLift;
 float ShadowStart;
 float ShadowEnd;
 float3 HaloTint;
+float LocalVeilingStrength;
+uint CompositeFilter;
 uint DebugMode;
 
 void BlackMistPrefilterPS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
 {
 	const float2 UV = ApplyScreenTransform(SvPosition.xy, SvPositionToInputTextureUV);
-	float3 Color = BlackMistDownsample13(Input_Texture, Input_Sampler, UV, Input_ExtentInverse, Input_UVViewportBilinearMin, Input_UVViewportBilinearMax);
-	Color = BlackMistClampRadiance(Color, MaxScatterRadiance);
-
-	const float Mask = BlackMistSoftThresholdMask(Color, Threshold, SoftKnee);
-	OutColor = float4(max(Color * Mask * ScatterAmount, 0.0), 1.0);
+	const float3 Scatter = BlackMistPrefilter13(Input_Texture, Input_Sampler, UV, Input_ExtentInverse, Radius, Input_UVViewportBilinearMin, Input_UVViewportBilinearMax, Threshold, SoftKnee, ScatterAmount, MaxScatterRadiance, BaseScatter, ScatterMetric, ChromaSensitivity);
+	OutColor = float4(max(Scatter, 0.0), 1.0);
 }
 
 void BlackMistDownsamplePS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
 {
 	const float2 UV = ApplyScreenTransform(SvPosition.xy, SvPositionToInputTextureUV);
-	const float3 Color = BlackMistDownsample13(Input_Texture, Input_Sampler, UV, Input_ExtentInverse, Input_UVViewportBilinearMin, Input_UVViewportBilinearMax);
+	const float3 Color = BlackMistDownsample13(Input_Texture, Input_Sampler, UV, Input_ExtentInverse, Radius, Input_UVViewportBilinearMin, Input_UVViewportBilinearMax);
 	OutColor = float4(max(Color, 0.0), 1.0);
 }
 
@@ -86,78 +89,113 @@ void BlackMistUpsamplePS(float4 SvPosition : SV_POSITION, out float4 OutColor : 
 	const float2 LowUV = ApplyScreenTransform(SvPosition.xy, SvPositionToLowTextureUV);
 	const float2 BaseUV = ApplyScreenTransform(SvPosition.xy, SvPositionToBaseTextureUV);
 
-	const float3 Low = BlackMistTent9(LowInput_Texture, LowInput_Sampler, LowUV, LowInput_ExtentInverse, LowInput_UVViewportBilinearMin, LowInput_UVViewportBilinearMax) * LowWeight;
+	const float3 Low = BlackMistTent9(LowInput_Texture, LowInput_Sampler, LowUV, LowInput_ExtentInverse, Radius, LowInput_UVViewportBilinearMin, LowInput_UVViewportBilinearMax) * LowWeight;
 	const float3 Base = BlackMistSample(BaseInput_Texture, BaseInput_Sampler, BaseUV, BaseInput_UVViewportBilinearMin, BaseInput_UVViewportBilinearMax).rgb * BaseWeight;
 
 	OutColor = float4(max(BlackMistSanitizeColor(Base) + BlackMistSanitizeColor(Low), 0.0), 1.0);
 }
 
-void BlackMistCompositePS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+float3 BlackMistCompositeUnit(float3 SceneRGB, float3 RawHalo, out float3 OutRemovedEnergy, out float3 OutHalo)
+{
+	const float Overdrive = max(Intensity, 1.0);
+	const float3 FullResScatter = BlackMistScatterSource(SceneRGB, Threshold, SoftKnee, ScatterAmount, MaxScatterRadiance, BaseScatter, ScatterMetric, ChromaSensitivity);
+
+	OutRemovedEnergy = FullResScatter * CoreLoss * Overdrive;
+	const float3 Direct = max(SceneRGB - OutRemovedEnergy, 0.0);
+	OutHalo = RawHalo * HaloTint * HaloStrength * Overdrive;
+
+	float3 Misted = max(Direct + OutHalo, 0.0);
+	const float EffectEnergy = max(BlackMistLuminance(OutHalo), BlackMistLuminance(OutRemovedEnergy));
+	const float LocalContrastMask = saturate(EffectEnergy / max(0.025 * BlackMistPreExposure(), 0.0001));
+	const float LocalVeil = LocalContrastMask * LocalVeilingStrength;
+	const float Pivot = ContrastPivot * BlackMistPreExposure();
+	const float LocalContrast = lerp(1.0, Contrast, LocalContrastMask);
+	Misted = max(Pivot + (Misted - Pivot) * LocalContrast, 0.0);
+
+	const float ShadowStartPreExposed = ShadowStart * BlackMistPreExposure();
+	const float ShadowEndPreExposed = max(ShadowEnd * BlackMistPreExposure(), ShadowStartPreExposed + 0.0001);
+	const float ShadowMask = 1.0 - smoothstep(ShadowStartPreExposed, ShadowEndPreExposed, BlackMistLuminance(Misted));
+	Misted += ShadowMask * ShadowLift * BlackMistPreExposure() * LocalVeil;
+
+	return max(BlackMistSanitizeColor(Misted), 0.0);
+}
+
+float4 BlackMistCompositeColor(float4 SvPosition, out float3 OutSceneRGB, out float3 OutRawHalo, out float3 OutRemovedEnergy, out float3 OutHalo)
 {
 	const float2 SceneUV = ApplyScreenTransform(SvPosition.xy, SvPositionToSceneColorTextureUV);
 	const float4 SceneColor = BlackMistSample(SceneColorInput_Texture, SceneColorInput_Sampler, SceneUV, SceneColorInput_UVViewportBilinearMin, SceneColorInput_UVViewportBilinearMax);
-	const float3 SceneRGB = BlackMistSanitizeColor(SceneColor.rgb);
-	const float Mask = BlackMistSoftThresholdMask(SceneRGB, Threshold, SoftKnee);
-
-	const float3 Core = max(SceneRGB - SceneRGB * Mask * CoreLoss * Intensity, 0.0);
+	OutSceneRGB = BlackMistSanitizeColor(SceneColor.rgb);
 
 	const float2 HaloUV = ApplyScreenTransform(SvPosition.xy, SvPositionToHaloTextureUV);
-	const float3 RawHalo = BlackMistTent9(HaloInput_Texture, HaloInput_Sampler, HaloUV, HaloInput_ExtentInverse, HaloInput_UVViewportBilinearMin, HaloInput_UVViewportBilinearMax);
-	const float3 Halo = RawHalo * HaloTint * HaloStrength * Intensity;
+	OutRawHalo = BlackMistReconstructHalo(HaloInput_Texture, HaloInput_Sampler, HaloUV, HaloInput_ExtentInverse, HaloInput_UVViewportBilinearMin, HaloInput_UVViewportBilinearMax, CompositeFilter);
 
-	const float Pivot = ContrastPivot * max(View.PreExposure, 0.000001);
-	float3 Misted = max(Core + Halo, 0.0);
-	Misted = max(Pivot + (Misted - Pivot) * Contrast, 0.0);
+	const float3 UnitMisted = BlackMistCompositeUnit(OutSceneRGB, OutRawHalo, OutRemovedEnergy, OutHalo);
+	const float BlendAmount = saturate(Intensity);
+	return float4(lerp(OutSceneRGB, UnitMisted, BlendAmount), SceneColor.a);
+}
 
-	const float ShadowStartPreExposed = ShadowStart * max(View.PreExposure, 0.000001);
-	const float ShadowEndPreExposed = max(ShadowEnd * max(View.PreExposure, 0.000001), ShadowStartPreExposed + 0.0001);
-	const float ShadowMask = 1.0 - smoothstep(ShadowStartPreExposed, ShadowEndPreExposed, BlackMistLuminance(Misted));
-	Misted += ShadowMask * ShadowLift * max(View.PreExposure, 0.000001);
+void BlackMistCompositePS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float3 SceneRGB;
+	float3 RawHalo;
+	float3 RemovedEnergy;
+	float3 Halo;
+	OutColor = BlackMistCompositeColor(SvPosition, SceneRGB, RawHalo, RemovedEnergy, Halo);
+}
+
+void BlackMistDebugCompositePS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float3 SceneRGB;
+	float3 RawHalo;
+	float3 RemovedEnergy;
+	float3 Halo;
+	const float4 FinalColor = BlackMistCompositeColor(SvPosition, SceneRGB, RawHalo, RemovedEnergy, Halo);
 
 	if (DebugMode == 1)
 	{
-		OutColor = float4(Mask.xxx, SceneColor.a);
+		const float Mask = BlackMistSoftThresholdMask(BlackMistSoftLimitRadiance(SceneRGB, MaxScatterRadiance), Threshold, SoftKnee, ScatterMetric, ChromaSensitivity, BaseScatter);
+		OutColor = float4(Mask.xxx, FinalColor.a);
 		return;
 	}
 	if (DebugMode == 2)
 	{
 		const float2 DebugUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDebugD1TextureUV);
-		OutColor = float4(BlackMistTent9(DebugD1Input_Texture, DebugD1Input_Sampler, DebugUV, DebugD1Input_ExtentInverse, DebugD1Input_UVViewportBilinearMin, DebugD1Input_UVViewportBilinearMax), SceneColor.a);
+		OutColor = float4(BlackMistTent9(DebugD1Input_Texture, DebugD1Input_Sampler, DebugUV, DebugD1Input_ExtentInverse, 1.0, DebugD1Input_UVViewportBilinearMin, DebugD1Input_UVViewportBilinearMax), FinalColor.a);
 		return;
 	}
 	if (DebugMode == 3)
 	{
 		const float2 DebugUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDebugD2TextureUV);
-		OutColor = float4(BlackMistTent9(DebugD2Input_Texture, DebugD2Input_Sampler, DebugUV, DebugD2Input_ExtentInverse, DebugD2Input_UVViewportBilinearMin, DebugD2Input_UVViewportBilinearMax), SceneColor.a);
+		OutColor = float4(BlackMistTent9(DebugD2Input_Texture, DebugD2Input_Sampler, DebugUV, DebugD2Input_ExtentInverse, 1.0, DebugD2Input_UVViewportBilinearMin, DebugD2Input_UVViewportBilinearMax), FinalColor.a);
 		return;
 	}
 	if (DebugMode == 4)
 	{
 		const float2 DebugUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDebugD3TextureUV);
-		OutColor = float4(BlackMistTent9(DebugD3Input_Texture, DebugD3Input_Sampler, DebugUV, DebugD3Input_ExtentInverse, DebugD3Input_UVViewportBilinearMin, DebugD3Input_UVViewportBilinearMax), SceneColor.a);
+		OutColor = float4(BlackMistTent9(DebugD3Input_Texture, DebugD3Input_Sampler, DebugUV, DebugD3Input_ExtentInverse, 1.0, DebugD3Input_UVViewportBilinearMin, DebugD3Input_UVViewportBilinearMax), FinalColor.a);
 		return;
 	}
 	if (DebugMode == 5)
 	{
 		const float2 DebugUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDebugD4TextureUV);
-		OutColor = float4(BlackMistTent9(DebugD4Input_Texture, DebugD4Input_Sampler, DebugUV, DebugD4Input_ExtentInverse, DebugD4Input_UVViewportBilinearMin, DebugD4Input_UVViewportBilinearMax), SceneColor.a);
+		OutColor = float4(BlackMistTent9(DebugD4Input_Texture, DebugD4Input_Sampler, DebugUV, DebugD4Input_ExtentInverse, 1.0, DebugD4Input_UVViewportBilinearMin, DebugD4Input_UVViewportBilinearMax), FinalColor.a);
 		return;
 	}
 	if (DebugMode == 6)
 	{
-		OutColor = float4(RawHalo, SceneColor.a);
+		OutColor = float4(RawHalo, FinalColor.a);
 		return;
 	}
 	if (DebugMode == 7)
 	{
-		OutColor = float4(Core, SceneColor.a);
+		OutColor = float4(max(RemovedEnergy, 0.0), FinalColor.a);
 		return;
 	}
 	if (DebugMode == 8)
 	{
-		OutColor = float4(max(Halo, 0.0), SceneColor.a);
+		OutColor = float4(max(Halo, 0.0), FinalColor.a);
 		return;
 	}
 
-	OutColor = float4(max(BlackMistSanitizeColor(Misted), 0.0), SceneColor.a);
+	OutColor = FinalColor;
 }

@@ -10,32 +10,67 @@ float3 BlackMistSanitizeColor(float3 Color)
 	return MakePositiveFinite(Color);
 }
 
-float3 BlackMistClampRadiance(float3 Color, float MaxRadianceScene)
+float BlackMistPreExposure()
+{
+	return max(View.PreExposure, 0.000001);
+}
+
+float3 BlackMistSoftLimitRadiance(float3 Color, float MaxRadianceScene)
 {
 	Color = BlackMistSanitizeColor(Color);
 
-	const float MaxRadiance = MaxRadianceScene * max(View.PreExposure, 0.000001);
-	if (MaxRadiance <= 0.0)
+	const float Limit = MaxRadianceScene * BlackMistPreExposure();
+	if (Limit <= 0.0)
 	{
 		return Color;
 	}
 
 	const float Peak = max(max(Color.r, Color.g), Color.b);
-	const float Scale = Peak > MaxRadiance ? MaxRadiance / max(Peak, 0.000001) : 1.0;
+	const float LimitedPeak = Limit * Peak / max(Limit + Peak, 0.000001);
+	const float Scale = LimitedPeak / max(Peak, 0.000001);
 	return Color * Scale;
 }
 
-float BlackMistSoftThresholdMask(float3 Color, float ThresholdScene, float SoftKnee)
+float BlackMistScatterMetric(float3 Color, uint MetricMode, float ChromaSensitivity)
 {
-	const float Threshold = max(ThresholdScene * max(View.PreExposure, 0.000001), 0.0);
-	const float Y = BlackMistLuminance(BlackMistSanitizeColor(Color));
+	const float Perceptual = BlackMistLuminance(Color);
+	const float Peak = max(max(Color.r, Color.g), Color.b);
+
+	if (MetricMode == 0)
+	{
+		return Perceptual;
+	}
+	if (MetricMode == 1)
+	{
+		return Peak;
+	}
+	return max(Perceptual, Peak * saturate(ChromaSensitivity));
+}
+
+float BlackMistSoftThresholdMaskFromMetric(float Metric, float ThresholdScene, float SoftKnee)
+{
+	const float Threshold = max(ThresholdScene * BlackMistPreExposure(), 0.0);
 	const float Knee = max(Threshold * SoftKnee, 0.0001);
 
-	float Soft = saturate((Y - Threshold + Knee) / (2.0 * Knee));
+	float Soft = saturate((Metric - Threshold + Knee) / (2.0 * Knee));
 	Soft = Soft * Soft * (3.0 - 2.0 * Soft);
 
-	const float Hard = max(Y - Threshold, 0.0) / max(Y, 0.0001);
+	const float Hard = max(Metric - Threshold, 0.0) / max(Metric, 0.0001);
 	return saturate(max(Soft, Hard));
+}
+
+float BlackMistSoftThresholdMask(float3 Color, float ThresholdScene, float SoftKnee, uint MetricMode, float ChromaSensitivity, float BaseScatter)
+{
+	const float Metric = BlackMistScatterMetric(BlackMistSanitizeColor(Color), MetricMode, ChromaSensitivity);
+	const float HighlightMask = BlackMistSoftThresholdMaskFromMetric(Metric, ThresholdScene, SoftKnee);
+	return saturate(BaseScatter + (1.0 - BaseScatter) * HighlightMask);
+}
+
+float3 BlackMistScatterSource(float3 SceneColor, float ThresholdScene, float SoftKnee, float ScatterAmount, float MaxRadianceScene, float BaseScatter, uint MetricMode, float ChromaSensitivity)
+{
+	const float3 Limited = BlackMistSoftLimitRadiance(SceneColor, MaxRadianceScene);
+	const float Mask = BlackMistSoftThresholdMask(Limited, ThresholdScene, SoftKnee, MetricMode, ChromaSensitivity, BaseScatter);
+	return max(Limited * Mask * ScatterAmount, 0.0);
 }
 
 float2 BlackMistClampUV(float2 UV, float2 UVMin, float2 UVMax)
@@ -48,46 +83,96 @@ float4 BlackMistSample(Texture2D TextureObject, SamplerState TextureSampler, flo
 	return TextureObject.SampleLevel(TextureSampler, BlackMistClampUV(UV, UVMin, UVMax), 0.0);
 }
 
-float3 BlackMistWeightedSample(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 Offset, float2 UVMin, float2 UVMax)
+float3 BlackMistWeightedSample(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 Offset, float Radius, float2 UVMin, float2 UVMax)
 {
-	return BlackMistSanitizeColor(BlackMistSample(TextureObject, TextureSampler, UV + Offset * TexelSize, UVMin, UVMax).rgb);
+	return BlackMistSanitizeColor(BlackMistSample(TextureObject, TextureSampler, UV + Offset * TexelSize * Radius, UVMin, UVMax).rgb);
 }
 
-float3 BlackMistDownsample13(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 UVMin, float2 UVMax)
+float3 BlackMistPrefilterTap(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 Offset, float Radius, float2 UVMin, float2 UVMax, float ThresholdScene, float SoftKnee, float ScatterAmount, float MaxRadianceScene, float BaseScatter, uint MetricMode, float ChromaSensitivity)
 {
-	float3 Sum = 0.20 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(0.0, 0.0), UVMin, UVMax);
+	const float3 SceneColor = BlackMistSample(TextureObject, TextureSampler, UV + Offset * TexelSize * Radius, UVMin, UVMax).rgb;
+	return BlackMistScatterSource(SceneColor, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+}
 
-	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  0.0), UVMin, UVMax);
-	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  0.0), UVMin, UVMax);
-	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  1.0), UVMin, UVMax);
-	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -1.0), UVMin, UVMax);
+float3 BlackMistPrefilter13(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float Radius, float2 UVMin, float2 UVMax, float ThresholdScene, float SoftKnee, float ScatterAmount, float MaxRadianceScene, float BaseScatter, uint MetricMode, float ChromaSensitivity)
+{
+	float3 Sum = 0.20 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2(0.0, 0.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
 
-	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  1.0), UVMin, UVMax);
-	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  1.0), UVMin, UVMax);
-	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0, -1.0), UVMin, UVMax);
-	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0, -1.0), UVMin, UVMax);
+	Sum += 0.10 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  0.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.10 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  0.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.10 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  1.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.10 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -1.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
 
-	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 2.0,  0.0), UVMin, UVMax);
-	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-2.0,  0.0), UVMin, UVMax);
-	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  2.0), UVMin, UVMax);
-	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -2.0), UVMin, UVMax);
+	Sum += 0.05 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  1.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.05 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  1.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.05 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0, -1.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.05 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0, -1.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+
+	Sum += 0.05 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2( 2.0,  0.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.05 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2(-2.0,  0.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.05 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  2.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
+	Sum += 0.05 * BlackMistPrefilterTap(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -2.0), Radius, UVMin, UVMax, ThresholdScene, SoftKnee, ScatterAmount, MaxRadianceScene, BaseScatter, MetricMode, ChromaSensitivity);
 
 	return Sum;
 }
 
-float3 BlackMistTent9(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 UVMin, float2 UVMax)
+float3 BlackMistDownsample13(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float Radius, float2 UVMin, float2 UVMax)
 {
-	float3 Sum = 0.25 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(0.0, 0.0), UVMin, UVMax);
+	float3 Sum = 0.20 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(0.0, 0.0), Radius, UVMin, UVMax);
 
-	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  0.0), UVMin, UVMax);
-	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  0.0), UVMin, UVMax);
-	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  1.0), UVMin, UVMax);
-	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -1.0), UVMin, UVMax);
+	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  0.0), Radius, UVMin, UVMax);
+	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  0.0), Radius, UVMin, UVMax);
+	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  1.0), Radius, UVMin, UVMax);
+	Sum += 0.10 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -1.0), Radius, UVMin, UVMax);
 
-	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  1.0), UVMin, UVMax);
-	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  1.0), UVMin, UVMax);
-	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0, -1.0), UVMin, UVMax);
-	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0, -1.0), UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  1.0), Radius, UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  1.0), Radius, UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0, -1.0), Radius, UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0, -1.0), Radius, UVMin, UVMax);
+
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 2.0,  0.0), Radius, UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-2.0,  0.0), Radius, UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  2.0), Radius, UVMin, UVMax);
+	Sum += 0.05 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -2.0), Radius, UVMin, UVMax);
 
 	return Sum;
+}
+
+float3 BlackMistTent9(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float Radius, float2 UVMin, float2 UVMax)
+{
+	float3 Sum = 0.25 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(0.0, 0.0), Radius, UVMin, UVMax);
+
+	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  0.0), Radius, UVMin, UVMax);
+	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  0.0), Radius, UVMin, UVMax);
+	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0,  1.0), Radius, UVMin, UVMax);
+	Sum += 0.125 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.0, -1.0), Radius, UVMin, UVMax);
+
+	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0,  1.0), Radius, UVMin, UVMax);
+	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0,  1.0), Radius, UVMin, UVMax);
+	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 1.0, -1.0), Radius, UVMin, UVMax);
+	Sum += 0.0625 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-1.0, -1.0), Radius, UVMin, UVMax);
+
+	return Sum;
+}
+
+float3 BlackMistTent4(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float Radius, float2 UVMin, float2 UVMax)
+{
+	float3 Sum = 0.25 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-0.5, -0.5), Radius, UVMin, UVMax);
+	Sum += 0.25 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.5, -0.5), Radius, UVMin, UVMax);
+	Sum += 0.25 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2(-0.5,  0.5), Radius, UVMin, UVMax);
+	Sum += 0.25 * BlackMistWeightedSample(TextureObject, TextureSampler, UV, TexelSize, float2( 0.5,  0.5), Radius, UVMin, UVMax);
+	return Sum;
+}
+
+float3 BlackMistReconstructHalo(Texture2D TextureObject, SamplerState TextureSampler, float2 UV, float2 TexelSize, float2 UVMin, float2 UVMax, uint FilterMode)
+{
+	if (FilterMode == 0)
+	{
+		return BlackMistSanitizeColor(BlackMistSample(TextureObject, TextureSampler, UV, UVMin, UVMax).rgb);
+	}
+	if (FilterMode == 2)
+	{
+		return BlackMistTent9(TextureObject, TextureSampler, UV, TexelSize, 1.0, UVMin, UVMax);
+	}
+	return BlackMistTent4(TextureObject, TextureSampler, UV, TexelSize, 1.0, UVMin, UVMax);
 }

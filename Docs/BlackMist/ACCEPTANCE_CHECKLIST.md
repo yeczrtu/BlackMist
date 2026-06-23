@@ -1,146 +1,118 @@
-# UE5 Black Mist acceptance checklist
+# BlackMist quality-upgrade acceptance checklist
 
-Codex は、実施した項目だけを `[x]` にする。未実施項目を推測で完了扱いにしない。
+Mark only evidence-backed items complete.
 
-## A. Version and API
+## A. Baseline
 
-- [ ] `.uproject` と Engine から対象 UE バージョンを確定した。
-- [ ] 対象版の `SceneViewExtension.h` を読んだ。
-- [ ] 対象版の `PostProcessMaterialInputs.h` を読んだ。
-- [ ] 対象版の `ScreenPass.h` を読んだ。
-- [ ] Engine 内の `SubscribeToPostProcessingPass` 実装例を確認した。
-- [ ] View-aware overload が必要な版ではそれを使用している。
-- [ ] 採用した callback 位置が HDR・トーンマップ前であることを確認した。
-- [ ] API 差分を `IMPLEMENTATION_STATUS.md` に記録した。
+- [x] Starting branch and commit recorded.
+- [x] Working tree was clean or pre-existing changes were documented.
+- [x] Installed UE 5.7/5.8 APIs were inspected.
+- [x] Baseline screenshots and GPU timing were recorded, or inability was documented.
 
-## B. Plugin and module
+## B. Intensity and identity
 
-- [ ] Engine ソースを変更していない。
-- [ ] Runtime プラグインまたは既存 Runtime モジュール内に実装した。
-- [ ] Shader virtual path を適切な LoadingPhase で登録した。
-- [ ] `RenderCore`、`RHI`、`Renderer` などの依存が最小限である。
-- [ ] `Renderer/Private` include path を追加していない。
-- [ ] Editor-only module を Runtime から参照していない。
+- [x] `Intensity=0` produces original RGB and alpha through standard zero-pass activation and shader blend logic.
+- [x] Standard activation creates zero Black Mist passes at zero intensity.
+- [x] Contrast and shadow/veiling changes are included in the intensity blend.
+- [ ] Intensity sweep near zero is continuous in a rendered pixel-diff capture.
+- [x] Intensity values above one have documented semantics.
 
-## C. Lifecycle and threading
+## C. Scatter-energy model
 
-- [ ] World 単位の ViewExtension である。
-- [ ] `FSceneViewExtensions::NewExtension` で生成している。
-- [ ] WorldSubsystem が生成と破棄を管理している。
-- [ ] Render Thread は UObject を参照しない。
-- [ ] 設定は sanitization 済み POD として Render Thread へ転送される。
-- [ ] 毎フレーム `FlushRenderingCommands` を呼ばない。
-- [ ] PIE の開始／停止を複数回行ってもクラッシュしない。
-- [ ] モジュール／World 終了時に stale callback や raw pointer が残らない。
+- [x] One shared scatter-source definition is used by prefilter and composite.
+- [x] `ScatterAmount` affects both halo source and direct removal.
+- [x] `CoreLoss` is applied to scattered source, not independently to all highlighted color.
+- [x] Kernels and scale weights are normalized.
+- [x] Energy implications of `HaloStrength` and tint are documented.
 
-## D. Activation
+## D. Prefilter
 
-- [ ] Global enable CVar がある。
-- [ ] `bEnabled == false` で callback を登録しない。
-- [ ] `Intensity <= epsilon` で callback を登録しない。
-- [ ] 無効時に `BlackMist.*` GPU pass が 0 本である。
-- [ ] 対象外 World/View をフィルタしている。
-- [ ] SceneCapture は既定で対象外である。
-- [ ] unsupported feature level は安全にパススルーする。
+- [x] Each tap is sanitized before averaging.
+- [x] Each tap is soft-limited before averaging.
+- [x] Each tap is thresholded before averaging.
+- [x] Threshold and limiter are pre-exposure stable.
+- [ ] Subpixel emitter motion does not visibly flicker.
+- [ ] Extreme fireflies do not contaminate the wide halo in a rendered stress scene.
 
-## E. Eight-pass graph
+## E. Settings
 
-- [ ] Pass 1 `BlackMist.PrefilterHalf` が存在する。
-- [ ] Pass 2 `BlackMist.DownsampleQuarter` が存在する。
-- [ ] Pass 3 `BlackMist.DownsampleEighth` が存在する。
-- [ ] Pass 4 `BlackMist.DownsampleSixteenth` が存在する。
-- [ ] Pass 5 `BlackMist.UpsampleEighth` が存在する。
-- [ ] Pass 6 `BlackMist.UpsampleQuarter` が存在する。
-- [ ] Pass 7 `BlackMist.UpsampleHalf` が存在する。
-- [ ] Pass 8 `BlackMist.Composite` が存在する。
-- [ ] 高品質モードの Black Mist GPU pass は正確に 8 本である。
-- [ ] 各 intermediate texture の extent が期待値である。
-- [ ] odd resolution と 1 pixel 近辺の小 View でゼロ extent を作らない。
+- [x] Every scalar is finite before range clamping.
+- [x] Tint and weight components are finite.
+- [x] Invalid values fall back to documented defaults.
+- [x] Weights remain non-negative and sum to one.
+- [x] New settings are included in Project Settings reset customization.
+- [x] Blueprint/API compilation succeeds.
+- [x] Migration behavior is documented.
 
-## F. Prefilter and color science
+## F. Optical quality
 
-- [ ] scene-linear HDR で処理する。
-- [ ] soft-knee threshold がある。
-- [ ] threshold は pre-exposure に対して安定している。
-- [ ] MaxScatterRadiance による anti-firefly がある。
-- [ ] NaN/Inf を伝播させない。
-- [ ] scatter source は RGB chroma を保持する。
-- [ ] input ViewRect 外をサンプルしない。
+- [x] Diffusion radius is adjustable without adding passes.
+- [x] Wide-tail behavior is adjustable and normalized.
+- [x] Hybrid scatter metric handles saturated-emitter detection in source.
+- [x] Base scatter defaults to zero and is clamped to a small non-negative range.
+- [x] Local veiling affects regions with halo rather than grading the entire frame by default.
+- [ ] Point-source profile has no hard rings or severe axis artifacts in rendered validation.
 
-## G. Downsample/upsample quality
+## G. Composite and RDG
 
-- [ ] Pass 1 は高品質 downsample kernel を使う。
-- [ ] Pass 2–4 は low-pass downsample である。
-- [ ] Pass 5–7 は tent upsample である。
-- [ ] level weights は正規化されている。
-- [ ] 解像度変更で halo の見かけ半径が大きく変化しない。
-- [ ] 点光源に hard ring、stair-step、強い ringing が出ない。
+- [x] Final path remains exactly eight named passes.
+- [x] Final composite binds only SceneColor and U1 plus required constants.
+- [x] D1-D4 are not bound in normal Final mode.
+- [x] Debug output remains in Pass 8 without a ninth pass.
+- [x] `CoreLossOnly` displays removed energy or is renamed accurately.
+- [ ] Composite filter modes were visually and temporally compared.
+- [ ] Default filter was selected using visual and timing evidence.
+- [ ] DumpGPU confirms expected extents and resource lifetimes.
 
-## H. Composite
+## H. Intermediate format
 
-- [ ] halo を full-resolution SceneColor へ合成する。
-- [ ] highlight core loss がある。
-- [ ] core loss は同じ exposure-stable mask を使う。
-- [ ] contrast adjustment が過剰な白濁を起こさない。
-- [ ] shadow lift は低輝度マスク付きである。
-- [ ] halo tint が設定可能である。
-- [ ] 出力 RGB を負値にしない。
-- [ ] SceneColor alpha を保存する。
-- [ ] `Inputs.OverrideOutput` が有効な場合にそこへ書く。
-- [ ] callback は有効な `FScreenPassTexture` を返す。
+- [x] Mode 0 implements real Auto behavior.
+- [x] Auto checks public RHI pixel-format capabilities for texture sampling and render target use.
+- [x] RGBA16F fallback is implemented.
+- [ ] R11G11B10F quality was compared where used.
+- [ ] Selected format is recorded in profiling results.
 
-## I. View and output correctness
+## I. Rendering correctness
 
-- [ ] `FScreenPassTextureSlice` / Texture2DArray input を対象版の公式パターンで扱う。
-- [ ] Dynamic resolution または screen percentage で破綻しない。
-- [ ] non-zero ViewRect を正しく扱う。
-- [ ] split-screen で隣 View の色を halo に取り込まない。
-- [ ] viewport resize 後も古い texture reference を保持しない。
-- [ ] alpha propagation を有効にした構成を確認した、または未対応を明記した。
+- [x] Scene-linear HDR and pre-tonemap placement remain implemented through the existing callback location.
+- [x] Alpha is preserved in the final shader.
+- [x] OverrideOutput handling remains implemented.
+- [x] `FScreenPassTextureSlice` input handling remains implemented with `CopyFromSlice`.
+- [ ] Non-zero and odd ViewRects were rendered and inspected.
+- [ ] Dynamic resolution/screen percentage were tested.
+- [ ] Split-screen does not bleed between views.
+- [ ] SceneCapture behavior follows settings.
+- [ ] Path Tracing behavior follows settings in rendered validation.
 
-## J. Diagnostics
+## J. Builds and tests
 
-- [ ] `r.BlackMist.Debug` または同等機能がある。
-- [ ] scatter mask を表示できる。
-- [ ] D1、D2、D3、D4 を表示できる。
-- [ ] accumulated halo を表示できる。
-- [ ] final、halo-only、core-loss-only を比較できる。
-- [ ] Debug 表示のための 9 本目の常設 pass を追加していない。
-- [ ] RDG texture/event 名が識別しやすい。
+- [x] UE 5.7 Editor Development build succeeds.
+- [x] UE 5.7 Game Development build succeeds.
+- [x] UE 5.7 Shipping build succeeds.
+- [x] UE 5.8 Editor Development build succeeds.
+- [x] UE 5.8 Game Development build succeeds.
+- [x] UE 5.8 Shipping build succeeds.
+- [ ] Shader compilation succeeds on the final target RHI outside `-NullRHI`.
+- [x] CPU automation tests pass.
+- [ ] PIE start/stop lifecycle was exercised repeatedly.
+- [ ] Standalone was tested.
 
-## K. Build and runtime tests
+## K. Visual and exposure validation
 
-- [ ] Editor Development build が成功した。
-- [ ] Shader compile が成功した。
-- [ ] Editor viewport で動作した。
-- [ ] PIE で動作した。
-- [ ] Standalone で動作した。
-- [ ] Effect On/Off を runtime で切り替えた。
-- [ ] Auto exposure 変化を試験した。
-- [ ] 極端に明るい emissive を試験した。
-- [ ] black frame / white frame を試験した。
-- [ ] camera cut または急な露出変化を試験した。
-- [ ] プロジェクトが使う AA/TSR 構成を試験した。
-- [ ] SceneCapture が既定で影響を受けないことを確認した。
+- [ ] Black, gray, and white frames tested.
+- [ ] HDR emitter range tested.
+- [ ] Saturated color emitters tested.
+- [ ] Fixed exposure tested.
+- [ ] Auto exposure adaptation tested.
+- [ ] Camera cut tested.
+- [ ] Bloom-only, Black-Mist-only, and combined captures compared after this upgrade.
 
-## L. Profiling
+## L. Profiling and documentation
 
-- [ ] `stat gpu` を取得した。
-- [ ] `profilegpu` で 8 pass を確認した。
-- [ ] DumpGPU で intermediate extent を確認した。
-- [ ] GPU、RHI、解像度、screen percentage を記録した。
-- [ ] 各 pass と合計 GPU time を記録した。
-- [ ] Intermediate format を記録した。
-- [ ] RGBA16F 以外を採用した場合、画質比較を記録した。
-
-## M. Documentation and final report
-
-- [ ] Enable/setup 手順を書いた。
-- [ ] 全パラメータの単位、範囲、既定値を書いた。
-- [ ] 8 pass の役割を書いた。
-- [ ] callback 位置と理由を書いた。
-- [ ] 対象 UE 版固有の注意を書いた。
-- [ ] MRQ tiled、VR、mobile などの制限を正直に書いた。
-- [ ] 変更ファイル一覧を報告した。
-- [ ] 実行したコマンドと結果を報告した。
-- [ ] 未実施項目を報告した。
+- [ ] Per-pass and total GPU timing recorded.
+- [ ] Resolution, screen percentage, GPU, driver, RHI, Engine, and format recorded.
+- [ ] Baseline and upgraded timings compared.
+- [x] README updated.
+- [x] Implementation status updated.
+- [x] Unverified configurations remain explicitly listed.
+- [x] Final report includes changed files and exact commands run.

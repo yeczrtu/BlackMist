@@ -19,6 +19,10 @@ public:
 		SHADER_PARAMETER(float, SoftKnee)
 		SHADER_PARAMETER(float, ScatterAmount)
 		SHADER_PARAMETER(float, MaxScatterRadiance)
+		SHADER_PARAMETER(float, Radius)
+		SHADER_PARAMETER(float, BaseScatter)
+		SHADER_PARAMETER(float, ChromaSensitivity)
+		SHADER_PARAMETER(uint32, ScatterMetric)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -34,6 +38,7 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_STRUCT(FScreenPassTextureInput, Input)
 		SHADER_PARAMETER(FScreenTransform, SvPositionToInputTextureUV)
+		SHADER_PARAMETER(float, Radius)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -53,6 +58,7 @@ public:
 		SHADER_PARAMETER(FScreenTransform, SvPositionToBaseTextureUV)
 		SHADER_PARAMETER(float, BaseWeight)
 		SHADER_PARAMETER(float, LowWeight)
+		SHADER_PARAMETER(float, Radius)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -63,6 +69,42 @@ class FBlackMistCompositePS final : public FGlobalShader
 {
 	DECLARE_GLOBAL_SHADER(FBlackMistCompositePS);
 	SHADER_USE_PARAMETER_STRUCT(FBlackMistCompositePS, FGlobalShader);
+
+public:
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+		SHADER_PARAMETER_STRUCT(FScreenPassTextureInput, SceneColorInput)
+		SHADER_PARAMETER_STRUCT(FScreenPassTextureInput, HaloInput)
+		SHADER_PARAMETER(FScreenTransform, SvPositionToSceneColorTextureUV)
+		SHADER_PARAMETER(FScreenTransform, SvPositionToHaloTextureUV)
+		SHADER_PARAMETER(float, Threshold)
+		SHADER_PARAMETER(float, SoftKnee)
+		SHADER_PARAMETER(float, ScatterAmount)
+		SHADER_PARAMETER(float, MaxScatterRadiance)
+		SHADER_PARAMETER(float, Intensity)
+		SHADER_PARAMETER(float, HaloStrength)
+		SHADER_PARAMETER(float, CoreLoss)
+		SHADER_PARAMETER(float, Contrast)
+		SHADER_PARAMETER(float, ContrastPivot)
+		SHADER_PARAMETER(float, ShadowLift)
+		SHADER_PARAMETER(float, ShadowStart)
+		SHADER_PARAMETER(float, ShadowEnd)
+		SHADER_PARAMETER(FVector3f, HaloTint)
+		SHADER_PARAMETER(float, BaseScatter)
+		SHADER_PARAMETER(float, ChromaSensitivity)
+		SHADER_PARAMETER(float, LocalVeilingStrength)
+		SHADER_PARAMETER(uint32, ScatterMetric)
+		SHADER_PARAMETER(uint32, CompositeFilter)
+		RENDER_TARGET_BINDING_SLOTS()
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
+class FBlackMistDebugCompositePS final : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FBlackMistDebugCompositePS);
+	SHADER_USE_PARAMETER_STRUCT(FBlackMistDebugCompositePS, FGlobalShader);
 
 public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
@@ -81,6 +123,8 @@ public:
 		SHADER_PARAMETER(FScreenTransform, SvPositionToDebugD4TextureUV)
 		SHADER_PARAMETER(float, Threshold)
 		SHADER_PARAMETER(float, SoftKnee)
+		SHADER_PARAMETER(float, ScatterAmount)
+		SHADER_PARAMETER(float, MaxScatterRadiance)
 		SHADER_PARAMETER(float, Intensity)
 		SHADER_PARAMETER(float, HaloStrength)
 		SHADER_PARAMETER(float, CoreLoss)
@@ -90,6 +134,11 @@ public:
 		SHADER_PARAMETER(float, ShadowStart)
 		SHADER_PARAMETER(float, ShadowEnd)
 		SHADER_PARAMETER(FVector3f, HaloTint)
+		SHADER_PARAMETER(float, BaseScatter)
+		SHADER_PARAMETER(float, ChromaSensitivity)
+		SHADER_PARAMETER(float, LocalVeilingStrength)
+		SHADER_PARAMETER(uint32, ScatterMetric)
+		SHADER_PARAMETER(uint32, CompositeFilter)
 		SHADER_PARAMETER(uint32, DebugMode)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()

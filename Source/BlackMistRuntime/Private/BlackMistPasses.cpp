@@ -4,14 +4,21 @@
 
 #include "HAL/IConsoleManager.h"
 #include "PixelShaderUtils.h"
+#include "RHI.h"
 #include "RHIStaticStates.h"
 
 namespace
 {
 static TAutoConsoleVariable<int32> CVarBlackMistIntermediateFormat(
 	TEXT("r.BlackMist.IntermediateFormat"),
-	1,
+	0,
 	TEXT("Black Mist intermediate format. 0: Auto, 1: RGBA16F, 2: R11G11B10."),
+	ECVF_RenderThreadSafe);
+
+static TAutoConsoleVariable<int32> CVarBlackMistCompositeFilter(
+	TEXT("r.BlackMist.CompositeFilter"),
+	1,
+	TEXT("Black Mist full-resolution halo reconstruction. 0: bilinear 1 tap, 1: 4-tap bilinear tent, 2: 9-tap reference."),
 	ECVF_RenderThreadSafe);
 
 FIntPoint DivideAndRoundUp(const FIntPoint& Size, int32 Divisor)
@@ -24,7 +31,36 @@ FIntPoint DivideAndRoundUp(const FIntPoint& Size, int32 Divisor)
 EPixelFormat GetIntermediateFormat()
 {
 	const int32 FormatMode = CVarBlackMistIntermediateFormat.GetValueOnRenderThread();
-	return FormatMode == 2 ? PF_FloatR11G11B10 : PF_FloatRGBA;
+	if (FormatMode == 1)
+	{
+		return PF_FloatRGBA;
+	}
+
+	if (FormatMode == 2)
+	{
+		return PF_FloatR11G11B10;
+	}
+
+	constexpr EPixelFormatCapabilities RequiredCapabilities =
+		EPixelFormatCapabilities::Texture2D |
+		EPixelFormatCapabilities::TextureSample |
+		EPixelFormatCapabilities::RenderTarget;
+
+	return GPixelFormats[PF_FloatR11G11B10].Supported
+		&& GPixelFormats[PF_FloatR11G11B10].BlockBytes == 4
+		&& RHIPixelFormatHasCapabilities(PF_FloatR11G11B10, RequiredCapabilities)
+		? PF_FloatR11G11B10
+		: PF_FloatRGBA;
+}
+
+float GetD4RadiusMultiplier(float WideTail)
+{
+	return FMath::Lerp(1.75f, 2.35f, WideTail);
+}
+
+uint32 GetCompositeFilterMode()
+{
+	return static_cast<uint32>(FMath::Clamp(CVarBlackMistCompositeFilter.GetValueOnRenderThread(), 0, 2));
 }
 
 FScreenPassTexture CreatePyramidTexture(FRDGBuilder& GraphBuilder, const FIntPoint& Extent, const TCHAR* Name)
@@ -64,6 +100,10 @@ void AddPrefilterPass(FRDGBuilder& GraphBuilder, const FSceneView& View, FScreen
 	PassParameters->SoftKnee = Settings.SoftKnee;
 	PassParameters->ScatterAmount = Settings.ScatterAmount;
 	PassParameters->MaxScatterRadiance = Settings.MaxScatterRadiance;
+	PassParameters->Radius = Settings.DiffusionRadius;
+	PassParameters->BaseScatter = Settings.BaseScatter;
+	PassParameters->ChromaSensitivity = Settings.ChromaSensitivity;
+	PassParameters->ScatterMetric = Settings.ScatterMetric;
 	PassParameters->RenderTargets[0] = FScreenPassRenderTarget(Output.Texture, Output.ViewRect, ERenderTargetLoadAction::ENoAction).GetRenderTargetBinding();
 
 	TShaderMapRef<FBlackMistPrefilterPS> PixelShader(GetGlobalShaderMap(View.FeatureLevel));
@@ -76,13 +116,14 @@ void AddPrefilterPass(FRDGBuilder& GraphBuilder, const FSceneView& View, FScreen
 		Output.ViewRect);
 }
 
-void AddDownsamplePass(FRDGBuilder& GraphBuilder, const FSceneView& View, const TCHAR* EventName, FScreenPassTexture Input, FScreenPassTexture Output)
+void AddDownsamplePass(FRDGBuilder& GraphBuilder, const FSceneView& View, const TCHAR* EventName, FScreenPassTexture Input, FScreenPassTexture Output, float Radius)
 {
 	FRHISamplerState* BilinearClampSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 
 	FBlackMistDownsamplePS::FParameters* PassParameters = GraphBuilder.AllocParameters<FBlackMistDownsamplePS::FParameters>();
 	PassParameters->Input = MakeInput(Input, BilinearClampSampler);
 	PassParameters->SvPositionToInputTextureUV = MakeSvPositionToTextureUV(Output, Input);
+	PassParameters->Radius = Radius;
 	PassParameters->RenderTargets[0] = FScreenPassRenderTarget(Output.Texture, Output.ViewRect, ERenderTargetLoadAction::ENoAction).GetRenderTargetBinding();
 
 	TShaderMapRef<FBlackMistDownsamplePS> PixelShader(GetGlobalShaderMap(View.FeatureLevel));
@@ -103,7 +144,8 @@ void AddUpsamplePass(
 	FScreenPassTexture BaseInput,
 	FScreenPassTexture Output,
 	float BaseWeight,
-	float LowWeight)
+	float LowWeight,
+	float Radius)
 {
 	FRHISamplerState* BilinearClampSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 
@@ -114,6 +156,7 @@ void AddUpsamplePass(
 	PassParameters->SvPositionToBaseTextureUV = MakeSvPositionToTextureUV(Output, BaseInput);
 	PassParameters->BaseWeight = BaseWeight;
 	PassParameters->LowWeight = LowWeight;
+	PassParameters->Radius = Radius;
 	PassParameters->RenderTargets[0] = FScreenPassRenderTarget(Output.Texture, Output.ViewRect, ERenderTargetLoadAction::ENoAction).GetRenderTargetBinding();
 
 	TShaderMapRef<FBlackMistUpsamplePS> PixelShader(GetGlobalShaderMap(View.FeatureLevel));
@@ -124,6 +167,43 @@ void AddUpsamplePass(
 		PixelShader,
 		PassParameters,
 		Output.ViewRect);
+}
+
+template <typename ParametersType>
+void FillCompositeParameters(
+	const FSceneView& View,
+	FScreenPassTexture SceneColor,
+	FScreenPassTexture Halo,
+	FScreenPassRenderTarget Output,
+	const FBlackMistRenderSettings& Settings,
+	ParametersType* PassParameters)
+{
+	FRHISamplerState* BilinearClampSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+
+	PassParameters->View = View.ViewUniformBuffer;
+	PassParameters->SceneColorInput = MakeInput(SceneColor, BilinearClampSampler);
+	PassParameters->HaloInput = MakeInput(Halo, BilinearClampSampler);
+	PassParameters->SvPositionToSceneColorTextureUV = MakeSvPositionToTextureUV(Output, SceneColor);
+	PassParameters->SvPositionToHaloTextureUV = MakeSvPositionToTextureUV(Output, Halo);
+	PassParameters->Threshold = Settings.Threshold;
+	PassParameters->SoftKnee = Settings.SoftKnee;
+	PassParameters->ScatterAmount = Settings.ScatterAmount;
+	PassParameters->MaxScatterRadiance = Settings.MaxScatterRadiance;
+	PassParameters->Intensity = Settings.Intensity;
+	PassParameters->HaloStrength = Settings.HaloStrength;
+	PassParameters->CoreLoss = Settings.CoreLoss;
+	PassParameters->Contrast = Settings.Contrast;
+	PassParameters->ContrastPivot = Settings.ContrastPivot;
+	PassParameters->ShadowLift = Settings.ShadowLift;
+	PassParameters->ShadowStart = Settings.ShadowStart;
+	PassParameters->ShadowEnd = Settings.ShadowEnd;
+	PassParameters->HaloTint = Settings.HaloTint;
+	PassParameters->BaseScatter = Settings.BaseScatter;
+	PassParameters->ChromaSensitivity = Settings.ChromaSensitivity;
+	PassParameters->LocalVeilingStrength = Settings.LocalVeilingStrength;
+	PassParameters->ScatterMetric = Settings.ScatterMetric;
+	PassParameters->CompositeFilter = GetCompositeFilterMode();
+	PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
 }
 
 void AddCompositePass(
@@ -140,35 +220,35 @@ void AddCompositePass(
 {
 	FRHISamplerState* BilinearClampSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 
-	FBlackMistCompositePS::FParameters* PassParameters = GraphBuilder.AllocParameters<FBlackMistCompositePS::FParameters>();
-	PassParameters->View = View.ViewUniformBuffer;
-	PassParameters->SceneColorInput = MakeInput(SceneColor, BilinearClampSampler);
-	PassParameters->HaloInput = MakeInput(Halo, BilinearClampSampler);
+	if (Settings.DebugMode == static_cast<uint32>(EBlackMistDebugMode::Final))
+	{
+		FBlackMistCompositePS::FParameters* PassParameters = GraphBuilder.AllocParameters<FBlackMistCompositePS::FParameters>();
+		FillCompositeParameters(View, SceneColor, Halo, Output, Settings, PassParameters);
+
+		TShaderMapRef<FBlackMistCompositePS> PixelShader(GetGlobalShaderMap(View.FeatureLevel));
+		FPixelShaderUtils::AddFullscreenPass(
+			GraphBuilder,
+			GetGlobalShaderMap(View.FeatureLevel),
+			RDG_EVENT_NAME("BlackMist.Composite"),
+			PixelShader,
+			PassParameters,
+			Output.ViewRect);
+		return;
+	}
+
+	FBlackMistDebugCompositePS::FParameters* PassParameters = GraphBuilder.AllocParameters<FBlackMistDebugCompositePS::FParameters>();
+	FillCompositeParameters(View, SceneColor, Halo, Output, Settings, PassParameters);
 	PassParameters->DebugD1Input = MakeInput(D1, BilinearClampSampler);
 	PassParameters->DebugD2Input = MakeInput(D2, BilinearClampSampler);
 	PassParameters->DebugD3Input = MakeInput(D3, BilinearClampSampler);
 	PassParameters->DebugD4Input = MakeInput(D4, BilinearClampSampler);
-	PassParameters->SvPositionToSceneColorTextureUV = MakeSvPositionToTextureUV(Output, SceneColor);
-	PassParameters->SvPositionToHaloTextureUV = MakeSvPositionToTextureUV(Output, Halo);
 	PassParameters->SvPositionToDebugD1TextureUV = MakeSvPositionToTextureUV(Output, D1);
 	PassParameters->SvPositionToDebugD2TextureUV = MakeSvPositionToTextureUV(Output, D2);
 	PassParameters->SvPositionToDebugD3TextureUV = MakeSvPositionToTextureUV(Output, D3);
 	PassParameters->SvPositionToDebugD4TextureUV = MakeSvPositionToTextureUV(Output, D4);
-	PassParameters->Threshold = Settings.Threshold;
-	PassParameters->SoftKnee = Settings.SoftKnee;
-	PassParameters->Intensity = Settings.Intensity;
-	PassParameters->HaloStrength = Settings.HaloStrength;
-	PassParameters->CoreLoss = Settings.CoreLoss;
-	PassParameters->Contrast = Settings.Contrast;
-	PassParameters->ContrastPivot = Settings.ContrastPivot;
-	PassParameters->ShadowLift = Settings.ShadowLift;
-	PassParameters->ShadowStart = Settings.ShadowStart;
-	PassParameters->ShadowEnd = Settings.ShadowEnd;
-	PassParameters->HaloTint = Settings.HaloTint;
 	PassParameters->DebugMode = Settings.DebugMode;
-	PassParameters->RenderTargets[0] = Output.GetRenderTargetBinding();
 
-	TShaderMapRef<FBlackMistCompositePS> PixelShader(GetGlobalShaderMap(View.FeatureLevel));
+	TShaderMapRef<FBlackMistDebugCompositePS> PixelShader(GetGlobalShaderMap(View.FeatureLevel));
 	FPixelShaderUtils::AddFullscreenPass(
 		GraphBuilder,
 		GetGlobalShaderMap(View.FeatureLevel),
@@ -204,12 +284,15 @@ FScreenPassTexture AddBlackMistPasses(FRDGBuilder& GraphBuilder, const FSceneVie
 	}
 
 	AddPrefilterPass(GraphBuilder, View, Inputs.SceneColor, D1, Inputs.Settings);
-	AddDownsamplePass(GraphBuilder, View, TEXT("BlackMist.DownsampleQuarter"), D1, D2);
-	AddDownsamplePass(GraphBuilder, View, TEXT("BlackMist.DownsampleEighth"), D2, D3);
-	AddDownsamplePass(GraphBuilder, View, TEXT("BlackMist.DownsampleSixteenth"), D3, D4);
-	AddUpsamplePass(GraphBuilder, View, TEXT("BlackMist.UpsampleEighth"), D4, D3, U3, Inputs.Settings.ScaleWeights.Z, Inputs.Settings.ScaleWeights.W);
-	AddUpsamplePass(GraphBuilder, View, TEXT("BlackMist.UpsampleQuarter"), U3, D2, U2, Inputs.Settings.ScaleWeights.Y, 1.0f);
-	AddUpsamplePass(GraphBuilder, View, TEXT("BlackMist.UpsampleHalf"), U2, D1, U1, Inputs.Settings.ScaleWeights.X, 1.0f);
+	const float Radius = Inputs.Settings.DiffusionRadius;
+	const float D4Radius = Radius * GetD4RadiusMultiplier(Inputs.Settings.WideTail);
+
+	AddDownsamplePass(GraphBuilder, View, TEXT("BlackMist.DownsampleQuarter"), D1, D2, Radius * 1.15f);
+	AddDownsamplePass(GraphBuilder, View, TEXT("BlackMist.DownsampleEighth"), D2, D3, Radius * 1.35f);
+	AddDownsamplePass(GraphBuilder, View, TEXT("BlackMist.DownsampleSixteenth"), D3, D4, D4Radius);
+	AddUpsamplePass(GraphBuilder, View, TEXT("BlackMist.UpsampleEighth"), D4, D3, U3, Inputs.Settings.ScaleWeights.Z, Inputs.Settings.ScaleWeights.W, D4Radius);
+	AddUpsamplePass(GraphBuilder, View, TEXT("BlackMist.UpsampleQuarter"), U3, D2, U2, Inputs.Settings.ScaleWeights.Y, 1.0f, Radius * 1.35f);
+	AddUpsamplePass(GraphBuilder, View, TEXT("BlackMist.UpsampleHalf"), U2, D1, U1, Inputs.Settings.ScaleWeights.X, 1.0f, Radius);
 	AddCompositePass(GraphBuilder, View, Inputs.SceneColor, U1, D1, D2, D3, D4, Output, Inputs.Settings);
 
 	return MoveTemp(Output);

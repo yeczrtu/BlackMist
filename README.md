@@ -21,6 +21,11 @@ The effect is intended to behave more like optical black mist filtration than or
   7. `BlackMist.UpsampleHalf`
   8. `BlackMist.Composite`
 - Zero Black Mist RDG passes when disabled or intensity is zero.
+- Continuous `Intensity` control: `0..1` blends from untouched scene color to the unit effect, while `1..2` overdrives halo/core removal.
+- Per-tap prefilter thresholding and soft anti-firefly limiting before downsample averaging.
+- Shared scatter source for diffused halo and highlight core removal.
+- Adjustable diffusion radius, wide-tail weighting, base scatter, and saturated-emitter detection.
+- Separate final/debug composite shaders so normal final output does not bind debug-only D1-D4 resources.
 - ViewRect-aware screen pass sampling and `OverrideOutput` support.
 - Blueprint callable setup through `UBlackMistBlueprintLibrary`.
 - Debug views for mask, pyramid levels, accumulated halo, core loss, and halo only.
@@ -100,6 +105,19 @@ Each Black Mist parameter row has a reset arrow when its value differs from the 
 
 `Affect Path Tracing` is enabled by default so the effect can run in Path Tracing view modes. Disable it if a project needs path-traced reference output without Black Mist.
 
+Key parameter semantics:
+
+- `Intensity`: `0.0` is identity and standard activation creates no Black Mist passes; `0.0..1.0` blends in the complete unit effect; `1.0..2.0` keeps the unit blend and overdrives halo/core removal.
+- `ScatterAmount`: fraction of scene radiance entering the diffusion source. It drives both the halo pyramid source and direct highlight removal.
+- `CoreLoss`: removes radiance from the same scatter source used by the halo, rather than darkening all highlighted color independently.
+- `HaloStrength` and `HaloTint`: artistic gain and tint applied to the accumulated scatter halo. Values above physically neutral settings can add energy.
+- `DiffusionRadius`: widens or tightens kernels without changing the fixed eight-pass graph.
+- `WideTail`: shifts normalized level weights toward the far pyramid levels for longer veiling glare. Custom `ScaleWeights` still override the derived weights and are normalized.
+- `BaseScatter`: low-level scatter floor, clamped to `0.0..0.05`; the default is zero.
+- `ScatterMetric`: perceptual luminance, peak channel, or hybrid detection for saturated emitters.
+- `ChromaSensitivity`: contribution of peak-channel detection in hybrid mode.
+- `LocalVeilingStrength`: controls local shadow lift from the mist veil. `Contrast` uses its own local mask derived from the actual halo/core-loss energy, so it remains responsive without grading untouched parts of the frame.
+
 Settings can still be changed at runtime from Blueprint through:
 
 - `SetBlackMistSettings`
@@ -126,8 +144,25 @@ Useful console variables:
 ```text
 r.BlackMist.Enable 1
 r.BlackMist.Debug -1
-r.BlackMist.IntermediateFormat 1
+r.BlackMist.IntermediateFormat 0
+r.BlackMist.CompositeFilter 1
 r.BlackMist.ForcePassLocation 0
+```
+
+`r.BlackMist.IntermediateFormat` values:
+
+```text
+0 Auto: use R11G11B10F only when the RHI reports Texture2D, TextureSample, and RenderTarget support; otherwise RGBA16F
+1 RGBA16F
+2 R11G11B10F
+```
+
+`r.BlackMist.CompositeFilter` values:
+
+```text
+0 one bilinear sample
+1 four-tap bilinear tent default
+2 nine-tap reference
 ```
 
 `r.BlackMist.Debug` values:
@@ -141,7 +176,7 @@ r.BlackMist.ForcePassLocation 0
  4 eighth downsample
  5 sixteenth downsample
  6 accumulated halo
- 7 core loss only
+ 7 core loss only removed energy
  8 halo only
 ```
 
@@ -153,16 +188,17 @@ The shaders include Engine shader headers by virtual path and do not copy Engine
 
 ## Validation Status
 
-The implementation has been checked against UE 5.7.4 and UE 5.8.0:
+The implementation has been checked against UE 5.7.4 and UE 5.8.0 on 2026-06-23:
 
-- `RunUAT BuildPlugin` succeeded for Win64 Editor Development, Development Game, and Shipping compile on both engine versions.
-- The consuming project mounted the plugin and reached Engine initialization without the earlier `Common.ush` shader include failure.
-- Project Settings integration compiles through UHT and all BuildPlugin target configurations.
-- Project Settings reset arrows are provided by the editor-only `BlackMistEditor` module.
-- Path Tracing view modes are no longer skipped by the ViewExtension when `Affect Path Tracing` is enabled.
+- `RunUAT BuildPlugin` succeeded for Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping` on UE 5.7.4 and UE 5.8.0.
+- `Plugins.BlackMist.Settings.Sanitization` automation test passed under `UnrealEditor-Cmd -NullRHI` on UE 5.7.4 and UE 5.8.0.
+- UHT completed with warnings as errors in both engine versions.
+- Project Settings integration and reset-arrow customization compile through the editor module.
+- Path Tracing view modes are not skipped when `Affect Path Tracing` is enabled.
 
 The following still need project-side validation:
 
+- Shader compilation on the final target RHI outside `-NullRHI`.
 - Editor viewport, PIE, Standalone, and Path Tracing visual behavior.
 - `profilegpu`, `stat gpu`, and `DumpGPU` verification of pass extents and timings.
 - Split-screen, dynamic resolution, TSR/AA matrix, SceneCapture, and MRQ behavior.
@@ -172,6 +208,8 @@ The following still need project-side validation:
 - [Implementation plan](Docs/BlackMist/IMPLEMENTATION_PLAN.md)
 - [Acceptance checklist](Docs/BlackMist/ACCEPTANCE_CHECKLIST.md)
 - [Implementation status](Docs/BlackMist/IMPLEMENTATION_STATUS.md)
+- [Quality upgrade status](Docs/BlackMist/QUALITY_UPGRADE_STATUS.md)
+- [Quality validation matrix](Docs/BlackMist/QUALITY_VALIDATION_MATRIX.md)
 - [License review](Docs/BlackMist/LICENSE_REVIEW.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
