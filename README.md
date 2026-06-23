@@ -4,7 +4,7 @@ Black Mist is a runtime Unreal Engine plugin that adds a pre-tonemap HDR diffusi
 
 The effect is intended to behave more like optical black mist filtration than ordinary additive bloom: highlights spread across multiple scales, the bright core is gently reduced, contrast is compressed slightly, and scene alpha is preserved.
 
-![Without Black Mist vs With Black Mist](Docs/BlackMist/Images/without-vs-with-black-mist.jpg)
+![Path-traced outdoor scene without Black Mist and with Black Mist](Docs/BlackMist/Images/path-tracing-without-vs-with-flower.jpg)
 
 ## Features
 
@@ -27,7 +27,21 @@ The effect is intended to behave more like optical black mist filtration than or
 
 ## Comparisons
 
-![Bloom Only vs Black Mist Only](Docs/BlackMist/Images/bloom-vs-black-mist.jpg)
+These captures show the effect in a high dynamic range outdoor scene, including Path Tracing view mode. Black Mist spreads overexposed highlights into a soft veil, slightly lifts the darkest regions, and keeps foreground detail readable.
+
+![Path-traced statue scene without Black Mist and with Black Mist](Docs/BlackMist/Images/path-tracing-without-vs-with-statue.jpg)
+
+_Full-scene comparison: the background highlights diffuse across the stone silhouette without replacing the underlying scene color._
+
+![Close-up statue scene without Black Mist and with Black Mist](Docs/BlackMist/Images/path-tracing-without-vs-with-statue-closeup.jpg)
+
+_Close-up comparison: the halo is most visible around bright high-contrast edges._
+
+![Bloom Only vs Black Mist Only on the statue scene](Docs/BlackMist/Images/path-tracing-bloom-vs-black-mist-statue.jpg)
+
+![Bloom Only vs Black Mist Only on the flower scene](Docs/BlackMist/Images/path-tracing-bloom-vs-black-mist-flower.jpg)
+
+_The `Black Mist Only` views show the isolated diffusion contribution. Black regions are areas where the pass adds little or no haze._
 
 ![No Effects, Black Mist, Standard Bloom, Black Mist + Standard Bloom](Docs/BlackMist/Images/effect-comparison-grid.jpg)
 
