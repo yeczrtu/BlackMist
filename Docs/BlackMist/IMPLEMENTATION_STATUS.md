@@ -106,6 +106,7 @@ Intermediate RDG textures are named:
 - `UBlackMistSubsystem` initializes its world settings from `UBlackMistProjectSettings::DefaultSettings`.
 - `UBlackMistSubsystem` sanitizes and normalizes settings on the game thread, then transfers the snapshot with `ENQUEUE_RENDER_COMMAND`.
 - In editor builds, changing `UBlackMistProjectSettings` reapplies defaults to existing world subsystems.
+- `bAffectPathTracing` is enabled by default and controls whether Path Tracing views receive the Black Mist pass.
 - Render thread does not access UObjects.
 - No `FlushRenderingCommands` calls were added.
 - UObject-facing `ScaleWeights` uses `FLinearColor` for UHT/Blueprint compatibility; it is converted to `FVector4f` in the render POD.
@@ -146,6 +147,7 @@ Result:
 - Re-run after adding `BlackMistEditor` reset-arrow customization also succeeded for `UnrealEditor Win64 Development`, `UnrealGame Win64 Development`, and `UnrealGame Win64 Shipping`.
 - Release packaging with UE 5.7.4 succeeded for Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping`.
 - Release packaging with UE 5.8.0 succeeded for Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping`.
+- Re-run after enabling Path Tracing views succeeded for UE 5.7.4 and UE 5.8.0 Win64 `UnrealEditor Development`, `UnrealGame Development`, and `UnrealGame Shipping`.
 
 Additional validation after shader include correction:
 
@@ -160,7 +162,7 @@ Additional validation after shader include correction:
 
 This repository has no real target `.uproject`, map, viewport, or content, so the following remain unverified:
 
-- Editor viewport visual result.
+- Editor viewport visual result, including Path Tracing mode.
 - PIE start/stop lifecycle.
 - Standalone runtime behavior.
 - `profilegpu`, `stat gpu`, and `DumpGPU` pass/extents.

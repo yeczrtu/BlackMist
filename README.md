@@ -35,7 +35,7 @@ The effect is intended to behave more like optical black mist filtration than or
 
 - Unreal Engine 5.7.4 and 5.8.0 were used for Win64 package validation.
 - Desktop SM5/SM6 rendering path.
-- The plugin is not validated for mobile, path tracing, or tiled Movie Render Queue output.
+- The plugin is not validated for mobile or tiled Movie Render Queue output.
 
 ## Repository Layout
 
@@ -83,6 +83,8 @@ Project Settings > Plugins > Black Mist
 `Default Settings` is applied when each world creates its `UBlackMistSubsystem`. In the editor, changing the Project Settings entry also pushes the new defaults into existing Black Mist subsystems.
 
 Each Black Mist parameter row has a reset arrow when its value differs from the plugin default.
+
+`Affect Path Tracing` is enabled by default so the effect can run in Path Tracing view modes. Disable it if a project needs path-traced reference output without Black Mist.
 
 Settings can still be changed at runtime from Blueprint through:
 
@@ -143,10 +145,11 @@ The implementation has been checked against UE 5.7.4 and UE 5.8.0:
 - The consuming project mounted the plugin and reached Engine initialization without the earlier `Common.ush` shader include failure.
 - Project Settings integration compiles through UHT and all BuildPlugin target configurations.
 - Project Settings reset arrows are provided by the editor-only `BlackMistEditor` module.
+- Path Tracing view modes are no longer skipped by the ViewExtension when `Affect Path Tracing` is enabled.
 
 The following still need project-side validation:
 
-- Editor viewport, PIE, and Standalone visual behavior.
+- Editor viewport, PIE, Standalone, and Path Tracing visual behavior.
 - `profilegpu`, `stat gpu`, and `DumpGPU` verification of pass extents and timings.
 - Split-screen, dynamic resolution, TSR/AA matrix, SceneCapture, and MRQ behavior.
 

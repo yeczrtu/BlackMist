@@ -75,6 +75,9 @@ struct BLACKMISTRUNTIME_API FBlackMistSettings
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Black Mist")
 	bool bAffectEditorViewports = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Black Mist")
+	bool bAffectPathTracing = true;
 };
 
 struct BLACKMISTRUNTIME_API FBlackMistRenderSettings
@@ -82,6 +85,7 @@ struct BLACKMISTRUNTIME_API FBlackMistRenderSettings
 	bool bEnabled = true;
 	bool bAffectSceneCaptures = false;
 	bool bAffectEditorViewports = true;
+	bool bAffectPathTracing = true;
 	float Intensity = 0.45f;
 	float Threshold = 1.0f;
 	float SoftKnee = 0.65f;
@@ -104,6 +108,7 @@ struct BLACKMISTRUNTIME_API FBlackMistRenderSettings
 		Out.bEnabled = InSettings.bEnabled;
 		Out.bAffectSceneCaptures = InSettings.bAffectSceneCaptures;
 		Out.bAffectEditorViewports = InSettings.bAffectEditorViewports;
+		Out.bAffectPathTracing = InSettings.bAffectPathTracing;
 		Out.Intensity = FMath::Clamp(InSettings.Intensity, 0.0f, 2.0f);
 		Out.Threshold = FMath::Max(InSettings.Threshold, 0.0f);
 		Out.SoftKnee = FMath::Clamp(InSettings.SoftKnee, 0.0f, 1.0f);
@@ -142,6 +147,7 @@ struct BLACKMISTRUNTIME_API FBlackMistRenderSettings
 		return bEnabled == Other.bEnabled
 			&& bAffectSceneCaptures == Other.bAffectSceneCaptures
 			&& bAffectEditorViewports == Other.bAffectEditorViewports
+			&& bAffectPathTracing == Other.bAffectPathTracing
 			&& Intensity == Other.Intensity
 			&& Threshold == Other.Threshold
 			&& SoftKnee == Other.SoftKnee

@@ -124,7 +124,7 @@ bool FBlackMistSceneViewExtension::ShouldSubscribeForView_RenderThread(const FSc
 		return false;
 	}
 
-	if (View.Family->EngineShowFlags.PathTracing)
+	if (View.Family->EngineShowFlags.PathTracing && !RenderSettings.bAffectPathTracing)
 	{
 		return false;
 	}
